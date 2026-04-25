@@ -1,0 +1,4 @@
+.env
+firebasegoogle.json
+node_modules/
+dist/

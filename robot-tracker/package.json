@@ -1,0 +1,21 @@
+{
+  "name": "robot-tracker",
+  "version": "1.0.0",
+  "description": "Robô para capturar localização do MONISAT",
+  "main": "robot-monisat.js",
+  "scripts": {
+    "start": "node robot-monisat.js",
+    "test": "node robot-monisat.js --test",
+    "dev": "node robot-monisat.js --test"
+  },
+  "keywords": ["monisat", "tracker", "firebase"],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "firebase-admin": "^13.8.0",
+    "node-cron": "^4.2.1",
+    "puppeteer": "^24.42.0"
+  }
+}

@@ -1,0 +1,37 @@
+/* Reset global para remover espaços em branco indesejados */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  width: 100%;
+  min-height: 100vh;
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;           /* Remove barra de rolagem horizontal */
+  background-color: #f8fafc;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+}
+
+/* Garante que o dashboard ocupe toda a tela */
+.dashboard {
+  width: 100%;
+  min-height: 100vh;
+  display: flex;
+}
+
+/* Remove qualquer margem/padding extra que o Vite deixa */
+body {
+  overflow-x: hidden;
+}
+
+/* Estilos úteis para o seu projeto */
+button {
+  cursor: pointer;
+}
+
+h1, h2, h3 {
+  margin: 0;
+}

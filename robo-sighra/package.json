@@ -1,0 +1,15 @@
+{
+  "name": "robo-sighra",
+  "version": "1.0.0",
+  "description": "Robô para capturar localizações do sistema SIGHRA",
+  "main": "robo-sighra.js",
+  "scripts": {
+    "start": "node robo-sighra.js",
+    "test": "node teste-sighra.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.6.1",
+    "firebase-admin": "^11.11.1",
+    "puppeteer": "^21.11.0"
+  }
+}

@@ -1,0 +1,262 @@
+{
+  "colunaLocalizacao": "Coluna: Localização",
+  "inputs": [
+    {
+      "index": 0,
+      "type": "text",
+      "name": "",
+      "id": "",
+      "placeholder": "",
+      "classe": "form-control form-control-sm inputtableGridGeral"
+    },
+    {
+      "index": 1,
+      "type": "text",
+      "name": "",
+      "id": "",
+      "placeholder": "",
+      "classe": "form-control form-control-sm inputtableGridGeral"
+    },
+    {
+      "index": 2,
+      "type": "text",
+      "name": "",
+      "id": "",
+      "placeholder": "",
+      "classe": "form-control form-control-sm inputtableGridGeral"
+    },
+    {
+      "index": 3,
+      "type": "text",
+      "name": "",
+      "id": "",
+      "placeholder": "",
+      "classe": "form-control form-control-sm inputtableGridGeral"
+    },
+    {
+      "index": 4,
+      "type": "text",
+      "name": "",
+      "id": "",
+      "placeholder": "",
+      "classe": "form-control form-control-sm inputtableGridGeral"
+    },
+    {
+      "index": 5,
+      "type": "text",
+      "name": "",
+      "id": "",
+      "placeholder": "",
+      "classe": "form-control form-control-sm inputtableGridGeral"
+    },
+    {
+      "index": 6,
+      "type": "text",
+      "name": "",
+      "id": "",
+      "placeholder": "",
+      "classe": "form-control form-control-sm inputtableGridGeral"
+    },
+    {
+      "index": 7,
+      "type": "text",
+      "name": "",
+      "id": "",
+      "placeholder": "",
+      "classe": "form-control form-control-sm inputtableGridGeral"
+    },
+    {
+      "index": 8,
+      "type": "text",
+      "name": "",
+      "id": "",
+      "placeholder": "",
+      "classe": "form-control form-control-sm inputtableGridGeral"
+    },
+    {
+      "index": 9,
+      "type": "text",
+      "name": "",
+      "id": "",
+      "placeholder": "",
+      "classe": "form-control form-control-sm inputtableGridGeral"
+    },
+    {
+      "index": 10,
+      "type": "text",
+      "name": "",
+      "id": "",
+      "placeholder": "",
+      "classe": "form-control form-control-sm inputtableGridGeral"
+    },
+    {
+      "index": 11,
+      "type": "text",
+      "name": "",
+      "id": "",
+      "placeholder": "",
+      "classe": "form-control form-control-sm inputtableGridGeral"
+    },
+    {
+      "index": 12,
+      "type": "text",
+      "name": "",
+      "id": "",
+      "placeholder": "",
+      "classe": "form-control form-control-sm inputtableGridGeral"
+    },
+    {
+      "index": 13,
+      "type": "text",
+      "name": "",
+      "id": "",
+      "placeholder": "",
+      "classe": "form-control form-control-sm inputtableGridGeral"
+    },
+    {
+      "index": 14,
+      "type": "text",
+      "name": "",
+      "id": "",
+      "placeholder": "",
+      "classe": "form-control form-control-sm inputtableGridGeral"
+    },
+    {
+      "index": 15,
+      "type": "text",
+      "name": "",
+      "id": "",
+      "placeholder": "",
+      "classe": "form-control form-control-sm inputtableGridGeral"
+    },
+    {
+      "index": 16,
+      "type": "text",
+      "name": "",
+      "id": "",
+      "placeholder": "",
+      "classe": "form-control form-control-sm inputtableGridGeral"
+    },
+    {
+      "index": 17,
+      "type": "text",
+      "name": "",
+      "id": "",
+      "placeholder": "",
+      "classe": "form-control form-control-sm inputtableGridGeral"
+    },
+    {
+      "index": 18,
+      "type": "text",
+      "name": "",
+      "id": "",
+      "placeholder": "",
+      "classe": "form-control form-control-sm inputtableGridGeral"
+    },
+    {
+      "index": 19,
+      "type": "text",
+      "name": "",
+      "id": "",
+      "placeholder": "",
+      "classe": "form-control form-control-sm inputtableGridGeral"
+    },
+    {
+      "index": 20,
+      "type": "text",
+      "name": "",
+      "id": "",
+      "placeholder": "",
+      "classe": "form-control form-control-sm inputtableGridGeral"
+    },
+    {
+      "index": 21,
+      "type": "text",
+      "name": "",
+      "id": "",
+      "placeholder": "",
+      "classe": "form-control form-control-sm inputtableGridGeral"
+    },
+    {
+      "index": 22,
+      "type": "text",
+      "name": "",
+      "id": "",
+      "placeholder": "",
+      "classe": "form-control form-control-sm inputtableGridGeral"
+    },
+    {
+      "index": 23,
+      "type": "text",
+      "name": "",
+      "id": "",
+      "placeholder": "",
+      "classe": "form-control form-control-sm inputtableGridGeral"
+    }
+  ],
+  "tables": [
+    {
+      "index": 0,
+      "numRows": 1,
+      "headers": [
+        "Gestor\n\nTodos\nRAFAEL\nTodos",
+        "Ação",
+        "Numero SM",
+        "Motorista",
+        "Rota",
+        "Placa",
+        "Carretas",
+        "Localização",
+        "Situação Veículo\n\nTodos\nAGREGADO\nCARREGADO\nFROTA\nGeneral Mills Extrema\nTERCEIRO\nVAZIO\nTodos",
+        "Situação Veículo 2\n\nTodos\nAGREGADO\nCARREGADO\nFROTA\nGeneral Mills Extrema\nTERCEIRO\nVAZIO\nTodos",
+        "Tempo até o Destino",
+        "Velocidade",
+        "Situação Viagem",
+        "Situação Viagem (%)",
+        "Origem"
+      ],
+      "exemplos": []
+    },
+    {
+      "index": 1,
+      "numRows": 2,
+      "headers": [
+        "Gestor\n\nTodos\nRAFAEL\nTodos",
+        "Ação",
+        "Numero SM",
+        "Motorista",
+        "Rota",
+        "Placa",
+        "Carretas",
+        "Localização",
+        "Situação Veículo\n\nTodos\nAGREGADO\nCARREGADO\nFROTA\nGeneral Mills Extrema\nTERCEIRO\nVAZIO\nTodos",
+        "Situação Veículo 2\n\nTodos\nAGREGADO\nCARREGADO\nFROTA\nGeneral Mills Extrema\nTERCEIRO\nVAZIO\nTodos",
+        "Tempo até o Destino",
+        "Velocidade",
+        "Situação Viagem",
+        "Situação Viagem (%)",
+        "Origem"
+      ],
+      "exemplos": [
+        [
+          "  &MM1>&MR0>&MT0>&MW0>&RP0>&RT0>&IDV51765>&IDSM3434766>&PLACAEJW7360>&VPOSICAO20-04-26 11:39>&VLAT-22.327600479126>&VLNG-46.9594993591309>&DATAAT22-04-2026>&DATA3023-03-2026>",
+          "&MM1>&MR0>&MT0>&MW0>&RP0>&RT0>&IDV51765>&IDSM3434766>&PLACAEJW7360>&VPOSICAO20-04-26 11:39>&VLAT-22.327600479126>&VLNG-46.9594993591309>&DATAAT22-04-2026>&DATA3023-03-2026>",
+          "",
+          " XXXXXXXXX &MM1>&MR0>&MT0>&MW0>&RP0>&RT0>&IDV51765>&IDSM3434766>&PLACAEJW7360>&VPOSICAO20-04-26 11:39>&VLAT-22.327600479126>&VLNG-46.9594993591309>&DATAAT22-04-2026>&DATA3023-03-2026>",
+          "  &MM1>&MR0>&MT0>&MW0>&RP0>&RT0>&IDV51765>&IDSM3434766>&PLACAEJW7360>&VPOSICAO20-04-26 11:39>&VLAT-22.327600479126>&VLNG-46.9594993591309>&DATAAT22-04-2026>&DATA3023-03-2026>",
+          " EJW7360 &MM1>&MR0>&MT0>&MW0>&RP0>&RT0>&IDV51765>&IDSM3434766>&PLACAEJW7360>&VPOSICAO20-04-26 11:39>&VLAT-22.327600479126>&VLNG-46.9594993591309>&DATAAT22-04-2026>&DATA3023-03-2026>",
+          "  &MM1>&MR0>&MT0>&MW0>&RP0>&RT0>&IDV51765>&IDSM3434766>&PLACAEJW7360>&VPOSICAO20-04-26 11:39>&VLAT-22.327600479126>&VLNG-46.9594993591309>&DATAAT22-04-2026>&DATA3023-03-2026>",
+          " SP - MOGI GUACU [...] &MM1>&MR0>&MT0>&MW0>&RP0>&RT0>&IDV51765>&IDSM3434766>&PLACAEJW7360>&VPOSICAO20-04-26 11:39>&VLAT-22.327600479126>&VLNG-46.9594993591309>&DATAAT22-04-2026>&DATA3023-03-2026>",
+          " FROTA &MM1>&MR0>&MT0>&MW0>&RP0>&RT0>&IDV51765>&IDSM3434766>&PLACAEJW7360>&VPOSICAO20-04-26 11:39>&VLAT-22.327600479126>&VLNG-46.9594993591309>&DATAAT22-04-2026>&DATA3023-03-2026>",
+          " VAZIO &MM1>&MR0>&MT0>&MW0>&RP0>&RT0>&IDV51765>&IDSM3434766>&PLACAEJW7360>&VPOSICAO20-04-26 11:39>&VLAT-22.327600479126>&VLNG-46.9594993591309>&DATAAT22-04-2026>&DATA3023-03-2026>",
+          "  &MM1>&MR0>&MT0>&MW0>&RP0>&RT0>&IDV51765>&IDSM3434766>&PLACAEJW7360>&VPOSICAO20-04-26 11:39>&VLAT-22.327600479126>&VLNG-46.9594993591309>&DATAAT22-04-2026>&DATA3023-03-2026>",
+          "0&MM1>&MR0>&MT0>&MW0>&RP0>&RT0>&IDV51765>&IDSM3434766>&PLACAEJW7360>&VPOSICAO20-04-26 11:39>&VLAT-22.327600479126>&VLNG-46.9594993591309>&DATAAT22-04-2026>&DATA3023-03-2026>",
+          "",
+          "  &MM1>&MR0>&MT0>&MW0>&RP0>&RT0>&IDV51765>&IDSM3434766>&PLACAEJW7360>&VPOSICAO20-04-26 11:39>&VLAT-22.327600479126>&VLNG-46.9594993591309>&DATAAT22-04-2026>&DATA3023-03-2026>",
+          "  &MM1>&MR0>&MT0>&MW0>&RP0>&RT0>&IDV51765>&IDSM3434766>&PLACAEJW7360>&VPOSICAO20-04-26 11:39>&VLAT-22.327600479126>&VLNG-46.9594993591309>&DATAAT22-04-2026>&DATA3023-03-2026>"
+        ]
+      ]
+    }
+  ],
+  "dataDescoberta": "2026-04-22T14:50:55.413Z"
+}
