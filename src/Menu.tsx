@@ -4,9 +4,9 @@ import ListaMotoristas from './ListaMotoristas';
 import ListaVeiculos from './ListaVeiculos';
 import ListaCarretas from './ListaCarretas';
 import MenuMotorista from './MenuMotorista';
-import ProgramacaoMapa from './ProgramacaoMapa';
+// import ProgramacaoMapa from './ProgramacaoMapa'; // COMENTADO - DESATIVADO
 import InserirProgramacao from './InserirProgramacao';
-import VisualizarProgramacoes from './VisualizarProgramacoes';
+// import VisualizarProgramacoes from './VisualizarProgramacoes'; // COMENTADO - DESATIVADO
 import LeadTime from './LeadTime';
 import Documentacao from './Documentacao';
 
@@ -33,9 +33,9 @@ const Menu = () => {
     'monitoramento' | 
     'frota-motoristas' | 
     'frota-veiculos' |
-    'cargas-inserir' |
-    'cargas-visualizar'
-  >('monitoramento');
+    'cargas-inserir' 
+    // 'cargas-visualizar' // REMOVIDO
+  >('frota-motoristas'); // ALTERADO: agora começa em frota-motoristas
 
   const [selectedMotoristaId, setSelectedMotoristaId] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -58,12 +58,13 @@ const Menu = () => {
   };
 
   const menuItems: MenuItemType[] = [
-    {
-      id: 'monitoramento',
-      label: 'Monitoramento',
-      icon: '🗺️',
-      color: '#FFD700'
-    },
+    // BLOCO MONITORAMENTO REMOVIDO - DESATIVADO
+    // {
+    //   id: 'monitoramento',
+    //   label: 'Monitoramento',
+    //   icon: '🗺️',
+    //   color: '#FFD700'
+    // },
     {
       id: 'frota',
       label: 'Frota',
@@ -82,8 +83,8 @@ const Menu = () => {
       color: '#FFD700',
       isSection: true,
       children: [
-        { id: 'cargas-inserir', label: 'Inserir Programação', icon: '➕', color: '#FFD700' },
-        { id: 'cargas-visualizar', label: 'Visualizar Programações', icon: '👁️', color: '#FFD700' }
+        { id: 'cargas-inserir', label: 'Inserir Programação', icon: '➕', color: '#FFD700' }
+        // { id: 'cargas-visualizar', label: 'Visualizar Programações', icon: '👁️', color: '#FFD700' } // REMOVIDO - DESATIVADO
       ]
     },
     {
@@ -101,20 +102,20 @@ const Menu = () => {
   ];
 
   const getCurrentTitle = () => {
-    if (activeTab === 'monitoramento') return 'Monitoramento';
+    // if (activeTab === 'monitoramento') return 'Monitoramento'; // REMOVIDO
     if (activeTab === 'frota-motoristas') return 'Motoristas Cadastrados';
     if (activeTab === 'frota-veiculos') return 'Veículos Cadastrados';
     if (activeTab === 'cargas-inserir') return 'Inserir Programação';
-    if (activeTab === 'cargas-visualizar') return 'Visualizar Programações';
+    // if (activeTab === 'cargas-visualizar') return 'Visualizar Programações'; // REMOVIDO
     return 'Dashboard';
   };
 
   const getCurrentSubtitle = () => {
-    if (activeTab === 'monitoramento') return 'Acompanhamento em tempo real';
+    // if (activeTab === 'monitoramento') return 'Acompanhamento em tempo real'; // REMOVIDO
     if (activeTab === 'frota-motoristas') return 'Gerencie os motoristas da sua frota';
     if (activeTab === 'frota-veiculos') return 'Gerencie os veículos da sua frota';
     if (activeTab === 'cargas-inserir') return 'Cadastre novas cargas no sistema';
-    if (activeTab === 'cargas-visualizar') return 'Acompanhe e gerencie todas as cargas';
+    // if (activeTab === 'cargas-visualizar') return 'Acompanhe e gerencie todas as cargas'; // REMOVIDO
     return 'Gerencie sua frota de forma eficiente';
   };
 
@@ -271,7 +272,7 @@ const Menu = () => {
 
         <div style={contentAreaStyle}>
           <div style={contentWrapperStyle}>
-            {activeTab === 'monitoramento' && <ProgramacaoMapa />}
+            {/* {activeTab === 'monitoramento' && <ProgramacaoMapa />} COMENTADO - DESATIVADO */}
             {activeTab === 'frota-motoristas' && (
               selectedMotoristaId ? 
                 <MenuMotorista motoristaId={selectedMotoristaId} onVoltar={handleVoltarParaLista} /> 
@@ -280,7 +281,7 @@ const Menu = () => {
             )}
             {activeTab === 'frota-veiculos' && <ListaVeiculos />}
             {activeTab === 'cargas-inserir' && <InserirProgramacao />}
-            {activeTab === 'cargas-visualizar' && <VisualizarProgramacoes />}
+            {/* {activeTab === 'cargas-visualizar' && <VisualizarProgramacoes />} COMENTADO - DESATIVADO */}
           </div>
         </div>
       </div>

@@ -17,5 +17,5 @@
     "noUnusedParameters": false,
     "strict": true
   },
-  "include": ["src"]
+  "include": ["src", "server.js"]
 }

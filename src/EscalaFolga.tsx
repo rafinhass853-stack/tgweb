@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from './firebase';
 import { 
-    collection, onSnapshot, addDoc, query, serverTimestamp, deleteDoc, doc 
+    collection, onSnapshot, addDoc, query, serverTimestamp, deleteDoc, doc, getDocs, writeBatch 
 } from "firebase/firestore";
 import { 
     Plus, Trash2, ChevronLeft, ChevronRight, Calendar as CalendarIcon, 
@@ -36,7 +36,59 @@ const EscalaFolga: React.FC<EscalaFolgaProps> = ({ motoristaId, onVoltar }) => {
 
     const subColecaoRef = collection(db, "motoristas", motoristaId, "escalas_motoristas");
 
+    // Função para preencher automaticamente os dias a partir de 1º de abril
+    const autoPreencherDiasTrabalhados = async () => {
+        const dataInicio = new Date(2026, 3, 1); // 1º de abril de 2026 (mês 3 = abril)
+        const dataAtual = new Date();
+        const hoje = new Date(dataAtual.getFullYear(), dataAtual.getMonth(), dataAtual.getDate());
+        
+        // Coletar todas as datas já existentes no Firebase
+        const snapshot = await getDocs(subColecaoRef);
+        const datasExistentes = new Set(snapshot.docs.map(doc => doc.data().dataInicio));
+        
+        // Preparar batch para operação em lote
+        const batch = writeBatch(db);
+        let novosRegistros = 0;
+        
+        // Loop através de cada dia desde 1º de abril até hoje
+        let currentDate = new Date(dataInicio);
+        while (currentDate <= hoje) {
+            const dateStr = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-${String(currentDate.getDate()).padStart(2, '0')}`;
+            
+            // Se o dia não tem registro, adicionar como "Presente"
+            if (!datasExistentes.has(dateStr)) {
+                const docRef = doc(subColecaoRef);
+                batch.set(docRef, {
+                    tipo: 'Presente',
+                    dataInicio: dateStr,
+                    criadoEm: serverTimestamp()
+                });
+                novosRegistros++;
+            }
+            
+            currentDate.setDate(currentDate.getDate() + 1);
+        }
+        
+        // Executar o batch se houver novos registros
+        if (novosRegistros > 0) {
+            await batch.commit();
+            showNotification(`✅ ${novosRegistros} dias preenchidos automaticamente como "Presente"!`, "success");
+        }
+    };
+
     useEffect(() => {
+        // Verificar se já foi feito o preenchimento automático
+        const checkAndAutoFill = async () => {
+            const autoFillFlag = localStorage.getItem(`auto_filled_${motoristaId}`);
+            
+            if (!autoFillFlag) {
+                await autoPreencherDiasTrabalhados();
+                localStorage.setItem(`auto_filled_${motoristaId}`, 'true');
+            }
+        };
+        
+        checkAndAutoFill();
+        
         const unsub = onSnapshot(subColecaoRef, (snap) => {
             const list: any[] = [];
             snap.forEach(d => list.push({ id: d.id, ...d.data() }));
@@ -138,6 +190,13 @@ const EscalaFolga: React.FC<EscalaFolgaProps> = ({ motoristaId, onVoltar }) => {
         `;
         document.body.appendChild(notification);
         setTimeout(() => notification.remove(), 3000);
+    };
+
+    // Função para forçar o recálculo do auto-preenchimento (útil para administradores)
+    const resetAutoFill = () => {
+        localStorage.removeItem(`auto_filled_${motoristaId}`);
+        autoPreencherDiasTrabalhados();
+        showNotification("Recálculo do auto-preenchimento iniciado!", "success");
     };
 
     const renderMensal = () => {
@@ -261,14 +320,20 @@ const EscalaFolga: React.FC<EscalaFolgaProps> = ({ motoristaId, onVoltar }) => {
 
     return (
         <div style={containerStyle}>
-            <button onClick={onVoltar} style={voltarButtonStyle}>
-                ← Voltar ao Menu
-            </button>
+            <div style={headerTopStyle}>
+                <button onClick={onVoltar} style={voltarButtonStyle}>
+                    ← Voltar ao Menu
+                </button>
+                <button onClick={resetAutoFill} style={resetButtonStyle} title="Recalcular preenchimento automático">
+                    🔄 Recalcular Dias
+                </button>
+            </div>
             
             <div style={headerStyle}>
                 <div>
                     <h1 style={titleStyle}>🗓️ Controle de Escala</h1>
                     <p style={subtitleStyle}>Clique em qualquer dia para adicionar ou remover registro</p>
+                    <p style={autoFillInfoStyle}>✅ Dias preenchidos automaticamente como "Presente" a partir de 01/04/2026</p>
                 </div>
                 <div style={toggleContainer}>
                     <button 
@@ -361,6 +426,8 @@ const EscalaFolga: React.FC<EscalaFolgaProps> = ({ motoristaId, onVoltar }) => {
                             <Info size={18} /> Como funciona
                         </h3>
                         <p style={infoTextStyle}>
+                          ✅ Dias a partir de 01/04/2026 são preenchidos automaticamente como "Presente"<br />
+                          ✅ O gestor só precisa editar quando necessário (Folga, Férias, etc.)<br />
                           ✅ Clique em qualquer dia para adicionar um evento<br />
                           ❌ Clique no X para remover
                         </p>
@@ -468,6 +535,12 @@ const containerStyle: React.CSSProperties = {
     minHeight: '100vh'
 };
 
+const headerTopStyle: React.CSSProperties = {
+    display: 'flex',
+    justifyContent: 'space-between',
+    marginBottom: '20px'
+};
+
 const voltarButtonStyle: React.CSSProperties = {
     background: '#0a0a0a',
     border: '1px solid #222',
@@ -477,8 +550,20 @@ const voltarButtonStyle: React.CSSProperties = {
     cursor: 'pointer',
     fontWeight: '600',
     fontSize: '14px',
-    marginBottom: '20px',
     transition: 'all 0.3s ease'
+};
+
+const resetButtonStyle: React.CSSProperties = {
+    ...voltarButtonStyle,
+    background: '#1a1a2a',
+    borderColor: '#FFD700'
+};
+
+const autoFillInfoStyle: React.CSSProperties = {
+    color: '#10b981',
+    fontSize: '12px',
+    margin: '5px 0 0 0',
+    fontWeight: '500'
 };
 
 const headerStyle: React.CSSProperties = {

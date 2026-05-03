@@ -1,0 +1,6 @@
+2026/04/28-16:12:09.889 3648 Reusing MANIFEST C:\Projetos\Projeto TG\TGweb\.wwebjs_auth\session\Default\Local Storage\leveldb/MANIFEST-000001
+2026/04/28-16:12:09.894 3648 Recovering log #3
+2026/04/28-16:12:09.898 3648 Reusing old log C:\Projetos\Projeto TG\TGweb\.wwebjs_auth\session\Default\Local Storage\leveldb/000003.log 
+2026/04/28-16:13:09.910 1e4c Level-0 table #5: started
+2026/04/28-16:13:09.928 1e4c Level-0 table #5: 22172 bytes OK
+2026/04/28-16:13:09.932 1e4c Delete type=0 #3

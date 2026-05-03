@@ -1,7 +1,10 @@
+// ListaVeiculos.tsx (CÓDIGO CORRIGIDO COM BOTÃO DO RELATÓRIO)
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { db } from './firebase';
 import { collection, onSnapshot, doc, updateDoc, deleteDoc, query, where, getDocs, setDoc, Timestamp } from 'firebase/firestore';
 import MapaModal from './ListaVeiculosMapaModal';
+import { BarChart3 } from 'lucide-react';
 
 interface CargaProgramada {
   id: string;
@@ -49,6 +52,8 @@ interface MotivoIndisponibilidade {
 }
 
 const ListaVeiculos = () => {
+  const navigate = useNavigate();
+  
   const [veiculos, setVeiculos] = useState<Veiculo[]>([]);
   const [cargasPorVeiculo, setCargasPorVeiculo] = useState<Record<string, CargaProgramada | null>>({});
   const [motivosPorVeiculo, setMotivosPorVeiculo] = useState<Record<string, MotivoIndisponibilidade | null>>({});
@@ -65,7 +70,13 @@ const ListaVeiculos = () => {
   const [descricaoMotivo, setDescricaoMotivo] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
 
-  // Buscar veículos - com debounce para evitar piscar
+  // Função para normalizar placas (remover espaços, hífens, converter para maiúsculo)
+  const normalizarPlaca = (placa: string): string => {
+    if (!placa) return '';
+    return placa.toUpperCase().replace(/[-\s]/g, '');
+  };
+
+  // Buscar veículos
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'veiculos'), (snap) => {
       const veiculosList = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Veiculo));
@@ -112,6 +123,7 @@ const ListaVeiculos = () => {
     };
   }, [veiculos]);
 
+  // Buscar todas as cargas ativas
   const buscarTodasCargasAtivas = useCallback(async () => {
     try {
       const todasCargas: CargaProgramada[] = [];
@@ -142,7 +154,7 @@ const ListaVeiculos = () => {
     }
   }, []);
 
-  // Buscar cargas ativas - com intervalo maior e sem causar re-renderização desnecessária
+  // Buscar cargas ativas e correlacionar com veículos
   useEffect(() => {
     if (veiculos.length === 0) {
       setCargasPorVeiculo({});
@@ -156,13 +168,20 @@ const ListaVeiculos = () => {
       if (!isMounted) return;
       
       try {
+        setLoadingCargas(true);
         const todasCargas = await buscarTodasCargasAtivas();
         if (!isMounted) return;
         
         const cargasMap: Record<string, CargaProgramada | null> = {};
         
         veiculos.forEach(veiculo => {
-          const cargaEncontrada = todasCargas.find(carga => carga.placa === veiculo.placa);
+          const placaVeiculoNorm = normalizarPlaca(veiculo.placa);
+          
+          const cargaEncontrada = todasCargas.find(carga => {
+            const placaCargaNorm = normalizarPlaca(carga.placa);
+            return placaCargaNorm === placaVeiculoNorm;
+          });
+          
           cargasMap[veiculo.id] = cargaEncontrada || null;
         });
         
@@ -176,7 +195,7 @@ const ListaVeiculos = () => {
     
     carregarCargas();
     
-    const interval = setInterval(carregarCargas, 60000); // Aumentado para 60 segundos
+    const interval = setInterval(carregarCargas, 30000);
     return () => {
       isMounted = false;
       clearInterval(interval);
@@ -351,12 +370,42 @@ const ListaVeiculos = () => {
 
   return (
     <div style={{ padding: '40px 20px', backgroundColor: '#000', minHeight: '100vh', fontFamily: 'Inter, sans-serif' }}>
-      {/* Header */}
-      <div style={{ marginBottom: '30px' }}>
-        <h1 style={{ fontSize: '32px', fontWeight: 900, color: '#FFF', marginBottom: '10px' }}>🚛 Veículos Cadastrados</h1>
-        <p style={{ color: '#666' }}>Gerencie todos os veículos da sua frota</p>
+      {/* Header com botão do relatório */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px', flexWrap: 'wrap', gap: '16px' }}>
+        <div>
+          <h1 style={{ fontSize: '32px', fontWeight: 900, color: '#FFF', marginBottom: '10px' }}>🚛 Veículos Cadastrados</h1>
+          <p style={{ color: '#666' }}>Gerencie todos os veículos da sua frota</p>
+        </div>
+        
+        <button
+          onClick={() => navigate('/relatorio-veiculos')}
+          style={{
+            background: '#1A1A1A',
+            border: '1px solid #FFD700',
+            borderRadius: '12px',
+            padding: '12px 20px',
+            color: '#FFD700',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            fontSize: '14px',
+            fontWeight: '600',
+            transition: 'all 0.2s'
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = '#FFD70020';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = '#1A1A1A';
+          }}
+        >
+          <BarChart3 size={18} />
+          Relatório da Frota
+        </button>
       </div>
 
+      {/* Restante do conteúdo permanece igual */}
       {/* Dashboard de Estatísticas */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '30px' }}>
         <div style={{ background: '#0A0A0A', padding: '20px', borderRadius: '16px', border: '1px solid #1A1A1A', textAlign: 'center' }}>
@@ -799,7 +848,7 @@ const ListaVeiculos = () => {
         </div>
       )}
 
-      {/* Modal de Motivo */}
+      {/* Modais (mantidos iguais) */}
       {showMotivoModal && (
         <div style={{
           position: 'fixed',
@@ -858,7 +907,6 @@ const ListaVeiculos = () => {
         </div>
       )}
 
-      {/* Modal de Edição */}
       {editando && (
         <div style={{
           position: 'fixed',
@@ -928,7 +976,6 @@ const ListaVeiculos = () => {
         </div>
       )}
 
-      {/* Modal de Confirmação de Exclusão */}
       {showDeleteConfirm && (
         <div style={{
           position: 'fixed',
@@ -967,7 +1014,6 @@ const ListaVeiculos = () => {
         </div>
       )}
 
-            {/* Modal do Mapa */}
       {mapaModalVeiculo && (
         <MapaModal
           isOpen={true}

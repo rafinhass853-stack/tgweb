@@ -3,7 +3,10 @@ import { doc, getDoc, updateDoc, setDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import {
   getAuth,
-  createUserWithEmailAndPassword
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  updatePassword,
+  sendPasswordResetEmail
 } from 'firebase/auth';
 
 import { db, storage } from './firebase';
@@ -77,6 +80,7 @@ const MenuMotorista: React.FC<MenuMotoristaProps> = ({ motoristaId, onVoltar }) 
     try {
       let fotoUrlFinal = editForm.fotoPerfilUrl;
 
+      // Upload da foto se houver nova
       if (novaFoto) {
         const storageRef = ref(storage, `fotos-motoristas/${motorista.id}-${Date.now()}`);
         await uploadBytes(storageRef, novaFoto);
@@ -84,45 +88,101 @@ const MenuMotorista: React.FC<MenuMotoristaProps> = ({ motoristaId, onVoltar }) 
       }
 
       const motoristaRef = doc(db, 'motoristas', motorista.id);
-      const updatedData = {
-        ...editForm,
+      
+      // Dados base para atualização (sempre atualiza esses campos)
+      const baseUpdatedData: any = {
+        nome: editForm.nome,
+        cpf: editForm.cpf,
+        whatsapp: editForm.whatsapp || '',
+        cidade: editForm.cidade || '',
+        cnhCategoria: editForm.cnhCategoria || '',
+        temMopp: editForm.temMopp || 'Não',
         fotoPerfilUrl: fotoUrlFinal
       };
 
-      if (editForm.email && editForm.senha && editForm.senha.length >= 6) {
+      // VERIFICAR SE TEM EMAIL E SENHA PARA CRIAR/ATUALIZAR LOGIN
+      const emailInformado = editForm.email && editForm.email.trim() !== '';
+      const senhaInformada = editForm.senha && editForm.senha.trim() !== '';
+
+      if (emailInformado && senhaInformada && editForm.senha!.length >= 6) {
+        // CASO 1: Tem email e senha válidos - tentar criar/atualizar usuário no Auth
         try {
-          const userCredential = await createUserWithEmailAndPassword(
-            auth,
-            editForm.email.trim(),
-            editForm.senha
-          );
-
-          const newUid = userCredential.user.uid;
-
-          await setDoc(motoristaRef, {
-            ...updatedData,
-            uid: newUid,
-            email: editForm.email.trim(),
-          }, { merge: true });
-
-          alert('✅ Motorista criado com sucesso no Authentication!');
-
+          let uidExistente = motorista.uid;
+          
+          // Se não tem uid, tenta criar novo usuário
+          if (!uidExistente) {
+            const userCredential = await createUserWithEmailAndPassword(
+              auth,
+              editForm.email!.trim(),
+              editForm.senha!.trim()
+            );
+            uidExistente = userCredential.user.uid;
+            baseUpdatedData.uid = uidExistente;
+            baseUpdatedData.email = editForm.email!.trim();
+            
+            alert('✅ Usuário criado no Authentication com sucesso!');
+          } else {
+            // Usuário já existe, tenta atualizar a senha se necessário
+            try {
+              // Faz login para verificar se a senha mudou
+              if (motorista.email !== editForm.email) {
+                // Email mudou - melhor criar novo ou avisar
+                alert('⚠️ Para alterar o email, entre em contato com o administrador.');
+                baseUpdatedData.email = motorista.email; // Mantém email antigo
+              } else if (editForm.senha !== motorista.senha) {
+                // Senha mudou - tenta atualizar
+                try {
+                  // Precisa estar logado para mudar senha
+                  const userCred = await signInWithEmailAndPassword(auth, editForm.email!.trim(), editForm.senha!.trim());
+                  await updatePassword(userCred.user, editForm.senha!.trim());
+                  alert('✅ Senha atualizada com sucesso!');
+                } catch (loginError) {
+                  console.error('Erro ao autenticar para mudar senha:', loginError);
+                  // Se não conseguir logar, envia email de reset
+                  await sendPasswordResetEmail(auth, editForm.email!.trim());
+                  alert('⚠️ Enviamos um email para redefinir a senha. Por favor, verifique sua caixa de entrada.');
+                }
+              }
+              baseUpdatedData.email = editForm.email!.trim();
+            } catch (error) {
+              console.error('Erro ao atualizar usuário existente:', error);
+            }
+          }
+          
+          // Atualiza Firestore com todos os dados
+          await updateDoc(motoristaRef, baseUpdatedData);
+          
         } catch (authError: any) {
           if (authError.code === 'auth/email-already-in-use') {
-            alert('⚠️ Este email já está em uso no Authentication. Os dados foram atualizados no Firestore.');
-            await updateDoc(motoristaRef, updatedData);
+            alert('⚠️ Este email já está em uso. Os dados foram atualizados no sistema.');
+            baseUpdatedData.email = editForm.email!.trim();
+            await updateDoc(motoristaRef, baseUpdatedData);
           } else {
             console.error('Erro no Auth:', authError);
-            alert(`❌ Erro ao criar login: ${authError.message}`);
-            await updateDoc(motoristaRef, updatedData);
+            alert(`❌ Erro ao configurar login: ${authError.message}\n\nOs dados pessoais foram salvos.`);
+            await updateDoc(motoristaRef, baseUpdatedData);
           }
         }
       } else {
-        await updateDoc(motoristaRef, updatedData);
-        alert('✅ Dados pessoais atualizados com sucesso!');
+        // CASO 2: Sem email ou senha - apenas atualiza dados pessoais
+        if (!emailInformado) {
+          delete baseUpdatedData.email; // Remove email se não informado
+        }
+        await updateDoc(motoristaRef, baseUpdatedData);
+        
+        if (!emailInformado) {
+          alert('✅ Dados pessoais atualizados com sucesso! (Login não configurado)');
+        } else if (!senhaInformada) {
+          alert('✅ Dados pessoais atualizados! ⚠️ Para criar login, informe uma senha com 6+ caracteres.');
+        } else if (editForm.senha!.length < 6) {
+          alert('✅ Dados pessoais atualizados! ⚠️ A senha deve ter pelo menos 6 caracteres para criar o login.');
+        } else {
+          alert('✅ Dados pessoais atualizados com sucesso!');
+        }
       }
 
-      setMotorista({ ...updatedData, id: motorista.id });
+      // Atualiza estado local
+      setMotorista({ ...motorista, ...baseUpdatedData, id: motorista.id });
       setShowEditModal(false);
       setNovaFoto(null);
       setPreviewUrl(null);
@@ -203,45 +263,87 @@ const MenuMotorista: React.FC<MenuMotoristaProps> = ({ motoristaId, onVoltar }) 
               <button onClick={() => setShowEditModal(false)} style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: '#888' }}>×</button>
             </div>
 
-            <div style={formSectionTitle}>Dados Pessoais</div>
+            <div style={formSectionTitle}>📋 Dados Pessoais (sempre disponíveis para edição)</div>
             <div style={formGrid}>
-              <div><label style={labelStyle}>Nome Completo *</label>
-                <input type="text" value={editForm.nome} onChange={e => setEditForm({ ...editForm, nome: e.target.value })} style={inputField} />
+              <div>
+                <label style={labelStyle}>Nome Completo *</label>
+                <input 
+                  type="text" 
+                  value={editForm.nome} 
+                  onChange={e => setEditForm({ ...editForm, nome: e.target.value })} 
+                  style={inputField} 
+                />
               </div>
-              <div><label style={labelStyle}>CPF *</label>
-                <input type="text" value={editForm.cpf} onChange={e => setEditForm({ ...editForm, cpf: e.target.value })} style={inputField} />
+              <div>
+                <label style={labelStyle}>CPF *</label>
+                <input 
+                  type="text" 
+                  value={editForm.cpf} 
+                  onChange={e => setEditForm({ ...editForm, cpf: e.target.value })} 
+                  style={inputField} 
+                />
               </div>
-              <div><label style={labelStyle}>WhatsApp</label>
-                <input type="text" value={editForm.whatsapp || ''} onChange={e => setEditForm({ ...editForm, whatsapp: e.target.value })} style={inputField} />
+              <div>
+                <label style={labelStyle}>WhatsApp</label>
+                <input 
+                  type="text" 
+                  value={editForm.whatsapp || ''} 
+                  onChange={e => setEditForm({ ...editForm, whatsapp: e.target.value })} 
+                  style={inputField} 
+                  placeholder="(00) 00000-0000"
+                />
               </div>
-              <div><label style={labelStyle}>Cidade</label>
-                <input type="text" value={editForm.cidade || ''} onChange={e => setEditForm({ ...editForm, cidade: e.target.value })} style={inputField} />
+              <div>
+                <label style={labelStyle}>Cidade</label>
+                <input 
+                  type="text" 
+                  value={editForm.cidade || ''} 
+                  onChange={e => setEditForm({ ...editForm, cidade: e.target.value })} 
+                  style={inputField} 
+                  placeholder="São Paulo - SP"
+                />
               </div>
-              <div><label style={labelStyle}>CNH Categoria</label>
-                <input type="text" value={editForm.cnhCategoria || ''} onChange={e => setEditForm({ ...editForm, cnhCategoria: e.target.value.toUpperCase() })} style={inputField} maxLength={2} />
+              <div>
+                <label style={labelStyle}>CNH Categoria</label>
+                <input 
+                  type="text" 
+                  value={editForm.cnhCategoria || ''} 
+                  onChange={e => setEditForm({ ...editForm, cnhCategoria: e.target.value.toUpperCase() })} 
+                  style={inputField} 
+                  maxLength={2} 
+                  placeholder="E"
+                />
               </div>
-              <div><label style={labelStyle}>Possui MOPP?</label>
-                <select value={editForm.temMopp || 'Não'} onChange={e => setEditForm({ ...editForm, temMopp: e.target.value })} style={inputField}>
+              <div>
+                <label style={labelStyle}>Possui MOPP?</label>
+                <select 
+                  value={editForm.temMopp || 'Não'} 
+                  onChange={e => setEditForm({ ...editForm, temMopp: e.target.value })} 
+                  style={inputField}
+                >
                   <option value="Não">Não</option>
                   <option value="Sim">Sim</option>
                 </select>
               </div>
             </div>
 
-            <div style={formSectionTitle}>Acesso ao Aplicativo (Login)</div>
-            <div style={formGrid}>
+            <div style={formSectionTitle}>🔐 Acesso ao Aplicativo (opcional - deixe vazio para não criar login)</div>
+            <div style={{ ...formGrid, marginBottom: '15px' }}>
               <div>
-                <label style={labelStyle}>E-mail de Login *</label>
+                <label style={labelStyle}>E-mail de Login</label>
                 <input
                   type="email"
-                  placeholder="exemplo@tg.com"
+                  placeholder="exemplo@email.com"
                   value={editForm.email || ''}
                   onChange={e => setEditForm({ ...editForm, email: e.target.value })}
                   style={inputField}
                 />
+                <small style={{ color: '#666', fontSize: '11px', marginTop: '5px', display: 'block' }}>
+                  {motorista.email ? 'Deixe em branco para manter o email atual' : 'Preencha para criar acesso'}
+                </small>
               </div>
               <div>
-                <label style={labelStyle}>Senha de Acesso *</label>
+                <label style={labelStyle}>Senha de Acesso</label>
                 <input
                   type="text"
                   placeholder="Mínimo 6 caracteres"
@@ -249,20 +351,44 @@ const MenuMotorista: React.FC<MenuMotoristaProps> = ({ motoristaId, onVoltar }) 
                   onChange={e => setEditForm({ ...editForm, senha: e.target.value })}
                   style={inputField}
                 />
+                <small style={{ color: '#666', fontSize: '11px', marginTop: '5px', display: 'block' }}>
+                  {motorista.email ? 'Preencha apenas se quiser alterar a senha' : 'Necessário para criar o login'}
+                </small>
               </div>
             </div>
 
             <div style={{ marginTop: '30px' }}>
-              <label style={labelStyle}>Foto de Perfil</label>
-              <input type="file" accept="image/*" onChange={e => e.target.files && setNovaFoto(e.target.files[0])} style={{ marginTop: '10px', display: 'block', color: '#AAA' }} />
-              {previewUrl && <img src={previewUrl} alt="Preview" style={{ width: '100px', height: '100px', borderRadius: '50%', marginTop: '15px', objectFit: 'cover', border: '2px solid #FFD700' }} />}
+              <label style={labelStyle}>🖼️ Foto de Perfil</label>
+              <input 
+                type="file" 
+                accept="image/*" 
+                onChange={e => e.target.files && setNovaFoto(e.target.files[0])} 
+                style={{ marginTop: '10px', display: 'block', color: '#AAA' }} 
+              />
+              {(previewUrl || editForm.fotoPerfilUrl) && (
+                <div style={{ marginTop: '15px', display: 'flex', alignItems: 'center', gap: '15px' }}>
+                  <img 
+                    src={previewUrl || editForm.fotoPerfilUrl} 
+                    alt="Preview" 
+                    style={{ width: '80px', height: '80px', borderRadius: '50%', objectFit: 'cover', border: '2px solid #FFD700' }} 
+                  />
+                  <span style={{ color: '#888', fontSize: '12px' }}>
+                    {previewUrl ? 'Nova foto selecionada' : 'Foto atual'}
+                  </span>
+                </div>
+              )}
             </div>
 
             <div style={modalActions}>
               <button onClick={() => setShowEditModal(false)} style={cancelBtn}>Cancelar</button>
               <button onClick={handleSaveEdit} style={saveBtn} disabled={uploading}>
-                {uploading ? 'Salvando...' : 'Salvar Alterações'}
+                {uploading ? 'Salvando...' : '💾 Salvar Alterações'}
               </button>
+            </div>
+            
+            <div style={{ marginTop: '20px', padding: '12px', background: '#1A1A1A', borderRadius: '12px', fontSize: '12px', color: '#888', textAlign: 'center' }}>
+              💡 <strong>Dica:</strong> Você pode editar qualquer campo a qualquer momento. 
+              O login será criado/atualizado automaticamente quando email e senha forem fornecidos.
             </div>
           </div>
         </div>
@@ -271,14 +397,10 @@ const MenuMotorista: React.FC<MenuMotoristaProps> = ({ motoristaId, onVoltar }) 
   );
 };
 
-// Menu Items - APENAS Histórico e Escala/Folga ativos (outros inativados)
+// Menu Items - APENAS Histórico e Escala/Folga ativos
 const menuItems = [
-  // { id: 'programar', title: "Programar Motorista", icon: "📅", desc: "Agendar viagens e rotas", color: "#FFD700", bgColor: "#1A1A1A" }, // INATIVADO
   { id: 'historico', title: "Histórico de Viagens", icon: "🛣️", desc: "Todas as viagens realizadas", color: "#FFD700", bgColor: "#1A1A1A" },
-  // { id: 'abastecimentos', title: "Abastecimentos", icon: "⛽", desc: "Registro de combustível", color: "#FFD700", bgColor: "#1A1A1A" }, // INATIVADO
-  // { id: 'chat', title: "Chat com Motorista", icon: "💬", desc: "Comunicar diretamente", color: "#FFD700", bgColor: "#1A1A1A" }, // INATIVADO
   { id: 'escala', title: "Escala / Folga", icon: "🗓️", desc: "Gerenciar dias de descanso", color: "#FFD700", bgColor: "#1A1A1A" },
-  // { id: 'hodometro', title: "Hodômetro", icon: "🔢", desc: "Controle de quilometragem", color: "#FFD700", bgColor: "#1A1A1A" }, // INATIVADO
 ];
 
 // ==================== ESTILOS TEMA PRETO/DOURADO ====================

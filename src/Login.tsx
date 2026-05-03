@@ -18,44 +18,27 @@ const Login = () => {
       setRememberMe(true);
     }
   }, []);
+const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
+  e.preventDefault();
+  setError('');
+  setLoading(true);
 
-  const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    setError('');
-    setLoading(true);
+  try {
+    // Tenta fazer login com qualquer email/senha
+    await signInWithEmailAndPassword(auth, email, password);
+    
+    if (rememberMe) localStorage.setItem('rememberedEmail', email);
+    else localStorage.removeItem('rememberedEmail');
 
-    if (!email.includes('@') || !email.includes('.')) {
-      setError('Por favor, insira um email válido');
-      setLoading(false);
-      return;
-    }
-
-    try {
-      const userCredential = await signInWithEmailAndPassword(auth, email, password);
-      const user = userCredential.user;
-      const idTokenResult = await user.getIdTokenResult(true);
-      const role = idTokenResult.claims.role as string | undefined;
-
-      if (role === 'gestor') {
-        if (rememberMe) localStorage.setItem('rememberedEmail', email);
-        else localStorage.removeItem('rememberedEmail');
-
-        showNotification('✅ Login realizado com sucesso! Redirecionando...', 'success');
-        setTimeout(() => window.location.href = '/dashboard', 1500);
-      } else if (role === 'motorista') {
-        setError('⚠️ Este é o Painel do Gestor. Use o App Mobile para motoristas.');
-        await auth.signOut();
-      } else {
-        setError('⚠️ Usuário sem permissão definida. Contate o administrador.');
-        await auth.signOut();
-      }
-    } catch (err: any) {
-      console.error(err);
-      setError('❌ Email ou senha incorretos.');
-    } finally {
-      setLoading(false);
-    }
-  };
+    showNotification('✅ Login realizado com sucesso!', 'success');
+    setTimeout(() => window.location.href = '/dashboard', 1500);
+    
+  } catch (err: any) {
+    setError('❌ Email ou senha incorretos.');
+  } finally {
+    setLoading(false);
+  }
+};
 
   const showNotification = (message: string, type: 'success' | 'error') => {
     const notification = document.createElement('div');
