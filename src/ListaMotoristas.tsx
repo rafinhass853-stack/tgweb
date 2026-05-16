@@ -18,12 +18,12 @@ import {
 import { ref, listAll, getDownloadURL } from 'firebase/storage';
 import {
   Truck, MapPin, Calendar, Clock, AlertCircle, BarChart3, Printer, X, Search, 
-  UserCheck, UserMinus, Edit3, Trash2, Flag, Camera, Images, 
-  Navigation, Activity, RotateCcw, Filter, ChevronDown, MessageCircle, Save, Gauge, Bell
+  UserCheck, UserMinus, Edit3, Trash2, Flag, Camera, 
+  Navigation, Activity, RotateCcw, Filter, ChevronDown, MessageCircle, Save, Gauge, Bell, Route
 } from 'lucide-react';
 import MotoristaMapaModal from './ListaMotoristaMapaModal';
-import WhatsAppHistorico from './WhatsAppHistorico';
 import WhatsAppChatModal from './WhatsAppChatModal';
+import VisaoMapa from './VisaoMapa';
 import io from 'socket.io-client';
 
 interface Motorista {
@@ -107,6 +107,9 @@ interface VeiculoData {
   coordenadas?: { lat: number; lng: number };
   ultimaMacro?: string;
   ignicao?: string;
+  // NOVO CAMPO: Rota do MONISAT
+  rotaMonisat?: string;
+  ultimaAtualizacaoRotaMonisat?: any;
 }
 
 interface EscalaInfo {
@@ -156,6 +159,8 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
   const [observacaoEditando, setObservacaoEditando] = useState<string | null>(null);
   const [anotacoesMotoristas, setAnotacoesMotoristas] = useState<Record<string, string>>({});
   const [anotacaoEditando, setAnotacaoEditando] = useState<string | null>(null);
+  const [visaoAtiva, setVisaoAtiva] = useState<'lista' | 'mapa'>('lista');
+  const [motoristasParaMapa, setMotoristasParaMapa] = useState<any[]>([]);
   
   // FILTROS
   const [filtroTexto, setFiltroTexto] = useState('');
@@ -192,12 +197,7 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
   // MODAL MAPA
   const [mapaModalMotorista, setMapaModalMotorista] = useState<any>(null);
   
-  // WHATSAPP STATES
-  const [whatsappHistoricoOpen, setWhatsappHistoricoOpen] = useState<{ open: boolean; telefone: string; nome: string }>({
-    open: false,
-    telefone: '',
-    nome: ''
-  });
+  // WHATSAPP STATES - APENAS MODAL
   const [whatsappChatModalOpen, setWhatsappChatModalOpen] = useState<{ open: boolean; telefone: string; nome: string }>({
     open: false,
     telefone: '',
@@ -254,40 +254,13 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
     }
   };
 
-  // Função para abrir WhatsApp Web diretamente
-  const abrirWhatsAppWeb = (telefone: string | undefined, nome: string) => {
-    if (!telefone || telefone === '—' || telefone === 'Não informado') {
-      alert(`⚠️ Número de telefone não disponível para ${nome}`);
-      return;
-    }
-
-    let numeroLimpo = telefone.replace(/\D/g, '');
-    
-    if (numeroLimpo.length === 10 || numeroLimpo.length === 11) {
-      if (!numeroLimpo.startsWith('55')) {
-        numeroLimpo = '55' + numeroLimpo;
-      }
-    }
-    
-    const whatsappUrl = `https://web.whatsapp.com/send?phone=${numeroLimpo}`;
-    window.open(whatsappUrl, '_blank');
-  };
-
-  // Função para abrir modal de chat WhatsApp
+  // Função para abrir modal de chat/histórico
   const abrirWhatsAppChat = (telefone: string | undefined, nome: string) => {
     if (!telefone || telefone === '—' || telefone === 'Não informado') {
       alert(`⚠️ Número de telefone não disponível para ${nome}`);
       return;
     }
     setWhatsappChatModalOpen({ open: true, telefone, nome });
-  };
-
-  const abrirWhatsAppHistorico = (telefone: string | undefined, nome: string) => {
-    if (!telefone || telefone === '—' || telefone === 'Não informado') {
-      alert(`⚠️ Número de telefone não disponível para ${nome}`);
-      return;
-    }
-    setWhatsappHistoricoOpen({ open: true, telefone, nome });
   };
 
   const addNotification = (from: string, message: string, telefone: string) => {
@@ -530,6 +503,31 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
     }
   };
 
+  const formatarUltimaAtualizacaoRota = (timestamp: any): string => {
+    if (!timestamp) return '—';
+    try {
+      let date: Date;
+      if (timestamp?.toDate) {
+        date = timestamp.toDate();
+      } else if (timestamp?.seconds) {
+        date = new Date(timestamp.seconds * 1000);
+      } else {
+        date = new Date(timestamp);
+      }
+      const agora = new Date();
+      const diffMs = agora.getTime() - date.getTime();
+      const diffMin = Math.floor(diffMs / 60000);
+      
+      if (diffMin < 1) return 'agora mesmo';
+      if (diffMin < 60) return `há ${diffMin} min`;
+      const diffHoras = Math.floor(diffMin / 60);
+      if (diffHoras < 24) return `há ${diffHoras} h`;
+      return date.toLocaleDateString('pt-BR');
+    } catch {
+      return '—';
+    }
+  };
+
   useEffect(() => {
     const savedObservacoes: Record<string, string> = {};
     motoristas.forEach(m => {
@@ -591,7 +589,10 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
               ? { lat: data.ultimaLatitude, lng: data.ultimaLongitude }
               : undefined,
           ultimaMacro: data.ultimaMacro || data.ultimoStatus || undefined,
-          ignicao: data.ignicao || undefined
+          ignicao: data.ignicao || undefined,
+          // NOVO: Rota do MONISAT
+          rotaMonisat: data.rotaMonisat || undefined,
+          ultimaAtualizacaoRotaMonisat: data.ultimaAtualizacaoRotaMonisat || undefined
         };
       });
       setVeiculos(veiculosMap);
@@ -705,6 +706,43 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
       unsubscribers.forEach(unsub => unsub());
     };
   }, [motoristas, hoje]);
+
+  // PREPARAR DADOS PARA O MAPA
+  useEffect(() => {
+    const dadosParaMapa = motoristas.map(m => {
+      const carga = cargasPorMotorista[m.id];
+      const veiculoData = carga?.placa ? veiculos[carga.placa] : null;
+      const statusCarga = carga?.status || 'sem_carga';
+      
+      return {
+        id: m.id,
+        nome: m.nome,
+        cpf: m.cpf,
+        cidade: m.cidade,
+        whatsapp: m.whatsapp,
+        placa: carga?.placa || '—',
+        status: statusCarga,
+        statusLabel: STATUS_CARGA_MAP[statusCarga]?.label || 'Sem Carga',
+        statusCor: STATUS_CARGA_MAP[statusCarga]?.cor || '#6B7280',
+        coordenadas: veiculoData?.coordenadas,
+        ultimaLocalizacao: veiculoData?.ultimaLocalizacao,
+        ultimaAtualizacao: veiculoData?.ultimaAtualizacaoRastreador,
+        velocidade: veiculoData?.velocidade,
+        rotaMonisat: veiculoData?.rotaMonisat,
+        cargaAtual: carga ? {
+          id: carga.id,
+          coletaLocal: carga.coletaLocal,
+          coletaCidade: carga.coletaCidade,
+          entregaLocal: carga.entregaLocal,
+          entregaCidade: carga.entregaCidade,
+          coletaData: carga.coletaData,
+          entregaData: carga.entregaData,
+          peso: carga.peso
+        } : undefined
+      };
+    });
+    setMotoristasParaMapa(dadosParaMapa);
+  }, [motoristas, cargasPorMotorista, veiculos]);
 
   const recalcularPontualidade = (checkinInfo: CheckinInfo, carga: CargaProgramada): CheckinInfo => {
     if (!checkinInfo.dataHora || !carga) return checkinInfo;
@@ -1105,7 +1143,6 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
   const emptyStateStyle: React.CSSProperties = { textAlign: 'center', padding: '60px 20px', color: '#666', backgroundColor: '#0A0A0A', borderRadius: '24px', border: '1px solid #1A1A1A', marginTop: '32px' };
   const gridStyle: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(480px, 1fr))', gap: '24px' };
 
-  // Estilos dos cards (mantidos os mesmos do seu código original)
   const cardStyle: React.CSSProperties = { backgroundColor: '#0A0A0A', borderRadius: '24px', boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.3)', border: '1px solid #1A1A1A', overflow: 'hidden', cursor: 'pointer', transition: 'all 0.2s' };
   const fotoWrapperStyle: React.CSSProperties = { height: '100px', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#000', fontSize: '40px', fontWeight: 800 };
   const fotoStyle: React.CSSProperties = { width: '100%', height: '100%', objectFit: 'cover', position: 'absolute', top: 0, left: 0 };
@@ -1173,6 +1210,13 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
         input:focus, select:focus, textarea:focus { border-color: #FFD700!important; outline: none; }
         button:hover { transform: translateY(-1px); filter: brightness(0.98); }
         .thumbnail-hover:hover { transform: scale(1.05); border-color: #FFD700; }
+        .rota-text { 
+          font-size: 10px; 
+          color: #FFD700; 
+          word-break: break-word;
+          white-space: normal;
+          line-height: 1.4;
+        }
       `}</style>
 
       {/* PAINEL DE NOTIFICAÇÕES */}
@@ -1188,7 +1232,7 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
                 <p style={emptyNotificationsStyle}>Nenhuma notificação</p>
               ) : (
                 notifications.map(notif => (
-                  <div key={notif.id} style={notificationItemStyle} onClick={() => { abrirWhatsAppHistorico(notif.telefone, notif.from); setShowNotifications(false); setUnreadCount(0); }}>
+                  <div key={notif.id} style={notificationItemStyle} onClick={() => { abrirWhatsAppChat(notif.telefone, notif.from); setShowNotifications(false); setUnreadCount(0); }}>
                     <div style={notificationFromStyle}>{notif.from}</div>
                     <div style={notificationMessageStyle}>{notif.message}</div>
                     <div style={notificationTimeStyle}>{notif.timestamp.toLocaleTimeString()}</div>
@@ -1211,10 +1255,21 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
             <Bell size={18} />
             {unreadCount > 0 && <span style={{ position: 'absolute', top: -5, right: -5, backgroundColor: '#EF4444', borderRadius: '50%', width: '18px', height: '18px', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{unreadCount}</span>}
           </button>
-          <button style={{ ...reportBtnStyle, backgroundColor: whatsappReady ? '#075E54' : '#25D366', color: '#FFF' }} onClick={() => { if (!whatsappReady) alert('⚠️ WhatsApp não está conectado!\n\nPara conectar:\n1. Certifique-se que o servidor backend está rodando (npm run server)\n2. Escaneie o QR Code que aparece no terminal do servidor'); else alert('✅ WhatsApp conectado! Clique nos botões do motorista para conversar.'); }}>
+          <button style={{ ...reportBtnStyle, backgroundColor: whatsappReady ? '#075E54' : '#25D366', color: '#FFF' }} onClick={() => { if (!whatsappReady) alert('⚠️ WhatsApp não está conectado!\n\nPara conectar:\n1. Certifique-se que o servidor backend está rodando (npm run server)\n2. Escaneie o QR Code que aparece no terminal do servidor'); else alert('✅ WhatsApp conectado! Clique no botão do motorista para conversar.'); }}>
             <MessageCircle size={18} /> {whatsappReady ? 'WhatsApp Conectado' : 'Conectar WhatsApp'}
           </button>
           <button style={reportBtnStyle} onClick={handleOpenRelatorio}><BarChart3 size={18} /> Relatório</button>
+          <button 
+            style={{ 
+              ...reportBtnStyle, 
+              backgroundColor: visaoAtiva === 'mapa' ? '#FFD700' : '#1A1A1A', 
+              color: visaoAtiva === 'mapa' ? '#000' : '#FFF',
+              border: visaoAtiva === 'mapa' ? 'none' : '1px solid #333'
+            }} 
+            onClick={() => setVisaoAtiva(visaoAtiva === 'lista' ? 'mapa' : 'lista')}
+          >
+            {visaoAtiva === 'lista' ? '🗺️ Visão em Mapa' : '📋 Voltar para Lista'}
+          </button>
           <div style={statsContainerStyle}>
             <div style={statItemStyle}><span style={statNumberStyle}>{stats.total}</span><span style={statLabelStyle}>Total</span></div>
             <div style={statItemStyle}><span style={{ ...statNumberStyle, color: '#22C55E' }}>{stats.comProgramacao}</span><span style={statLabelStyle}>Programados</span></div>
@@ -1258,151 +1313,182 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
         </div>
       )}
 
-      {/* LISTA DE MOTORISTAS */}
-      {loadingData ? (
-        <div style={emptyStateStyle}><Clock size={48} color="#666" /><h3>Carregando informações...</h3></div>
-      ) : motoristasFiltrados.length === 0 ? (
-        <div style={emptyStateStyle}><AlertCircle size={48} color="#666" /><h3>Nenhum motorista encontrado com os filtros aplicados</h3></div>
-      ) : (
-        <div style={gridStyle}>
-          {motoristasFiltrados.map((m) => {
-            const carga = cargasPorMotorista[m.id];
-            const temProgramacao = carga !== null && carga !== undefined;
-            const eventoHoje = escalaHojePorMotorista[m.id];
-            const statusInfo = carga ? STATUS_CARGA_MAP[carga.status] : null;
-            const statusMotorista = getStatusMotorista(m, carga, eventoHoje);
-            const checkin = checkinsPorMotorista.get(m.id);
-            const canhotos = carga?.id ? canhotosPorCarga.get(carga.id) : [];
-            const isLoadingCanhotos = carga?.id ? loadingCanhotos.get(carga.id) : false;
-            const escalaInfo = escalaInfoPorMotorista[m.id] || { diasConsecutivosTrabalhados: 0, precisaFolgar: false, porcentagemPresenca: 0 };
-            const isDisponivelParaProgramar = statusMotorista.value === 'disponivel';
-            const placaVeiculo = carga?.placa || '';
-            const veiculoData = veiculos[placaVeiculo];
-            const localizacaoVeiculo = veiculoData?.ultimaLocalizacao || null;
-            const velocidadeVeiculo = getVelocidade(veiculoData);
-            const coordenadasVeiculo = veiculoData?.coordenadas || null;
-            const ultimaAtualizacao = veiculoData?.ultimaAtualizacaoRastreador;
-            const statusRastreador = veiculoData?.statusRastreador;
-            const ignicao = veiculoData?.ignicao;
+      {/* CONTEÚDO PRINCIPAL - LISTA OU MAPA */}
+      {visaoAtiva === 'lista' ? (
+        <>
+          {loadingData ? (
+            <div style={emptyStateStyle}><Clock size={48} color="#666" /><h3>Carregando informações...</h3></div>
+          ) : motoristasFiltrados.length === 0 ? (
+            <div style={emptyStateStyle}><AlertCircle size={48} color="#666" /><h3>Nenhum motorista encontrado com os filtros aplicados</h3></div>
+          ) : (
+            <div style={gridStyle}>
+              {motoristasFiltrados.map((m) => {
+                const carga = cargasPorMotorista[m.id];
+                const temProgramacao = carga !== null && carga !== undefined;
+                const eventoHoje = escalaHojePorMotorista[m.id];
+                const statusInfo = carga ? STATUS_CARGA_MAP[carga.status] : null;
+                const statusMotorista = getStatusMotorista(m, carga, eventoHoje);
+                const checkin = checkinsPorMotorista.get(m.id);
+                const canhotos = carga?.id ? canhotosPorCarga.get(carga.id) : [];
+                const isLoadingCanhotos = carga?.id ? loadingCanhotos.get(carga.id) : false;
+                const escalaInfo = escalaInfoPorMotorista[m.id] || { diasConsecutivosTrabalhados: 0, precisaFolgar: false, porcentagemPresenca: 0 };
+                const isDisponivelParaProgramar = statusMotorista.value === 'disponivel';
+                const placaVeiculo = carga?.placa || '';
+                const veiculoData = veiculos[placaVeiculo];
+                const localizacaoVeiculo = veiculoData?.ultimaLocalizacao || null;
+                const velocidadeVeiculo = getVelocidade(veiculoData);
+                const coordenadasVeiculo = veiculoData?.coordenadas || null;
+                const ultimaAtualizacao = veiculoData?.ultimaAtualizacaoRastreador;
+                const statusRastreador = veiculoData?.statusRastreador;
+                const ignicao = veiculoData?.ignicao;
+                
+                // NOVOS DADOS DO MONISAT
+                const rotaMonisat = veiculoData?.rotaMonisat || null;
+                const ultimaAtualizacaoRota = veiculoData?.ultimaAtualizacaoRotaMonisat;
 
-            return (
-              <div key={m.id} onClick={(e) => handleCardClick(m, e)} style={cardStyle}>
-                <div style={{ ...fotoWrapperStyle, background: `linear-gradient(135deg, ${getRandomColor(m.id)}, #1a1a1a)` }}>
-                  {m.fotoPerfilUrl ? <img src={m.fotoPerfilUrl} alt={m.nome} style={fotoStyle} /> : <div style={initialsStyle}>{getInitials(m.nome)}</div>}
-                  <div style={moppBadgeStyle}>{m.temMopp === 'Sim' ? '✅ MOPP' : '❌ Sem MOPP'}</div>
-                </div>
-                <div style={contentStyle}>
-                  <h3 style={nomeStyle}>{m.nome}</h3>
-                  <p style={cpfStyle}>{m.cpf}</p>
-                  <div style={infoEscalaCardStyle}><div style={infoEscalaRowStyle}><span style={infoEscalaLabelStyle}><Clock size={10} style={{ marginRight: '4px' }} /> Dias consecutivos</span><span style={infoEscalaValueStyle}>{escalaInfo.diasConsecutivosTrabalhados}</span></div></div>
-                  <div style={infoGridStyle}>
-                    <div style={infoItemStyle}><MapPin size={12} color="#FFD700" /><span><strong>Cidade:</strong> {m.cidade || 'Não informada'}</span></div>
-                    <div style={infoItemStyle}><span>📱</span><span><strong>Telefone:</strong> {m.whatsapp || m.telefone || 'Não informado'}</span></div>
-                  </div>
-                  <div style={{ ...infoItemStyle, marginBottom: '12px' }}><span>🚛</span><span><strong>Viagens Realizadas:</strong> {m.viagensRealizadas || 0}</span></div>
-
-                  {/* ANOTAÇÕES */}
-                  <div style={anotacaoContainerStyle}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}><span style={{ fontSize: '10px', color: '#FFD700' }}>📝</span><span style={{ fontSize: '10px', fontWeight: 700, color: '#FFD700' }}>ANOTAÇÕES</span></div>
-                    {anotacaoEditando === m.id ? (
-                      <div>
-                        <textarea style={anotacaoInputStyle} rows={3} placeholder="Ex: motorista com restrição médica, aguardando documentação..." defaultValue={anotacoesMotoristas[m.id] || ''} id={`anotacao_${m.id}`} />
-                        <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
-                          <button style={{ ...smallButtonStyle, backgroundColor: '#22C55E', color: '#000' }} onClick={(e) => { e.stopPropagation(); const textarea = document.getElementById(`anotacao_${m.id}`) as HTMLTextAreaElement; if (textarea) salvarAnotacao(m.id, textarea.value); }}><Save size={10} /> Salvar</button>
-                          <button style={{ ...smallButtonStyle, backgroundColor: '#EF4444', color: '#FFF' }} onClick={(e) => { e.stopPropagation(); setAnotacaoEditando(null); }}>Cancelar</button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div>
-                        <p style={anotacaoTextStyle}>{anotacoesMotoristas[m.id] || 'Nenhuma anotação cadastrada'}</p>
-                        <button style={{ ...smallButtonStyle, backgroundColor: '#FFD70020', color: '#FFD700', border: '1px solid #FFD700' }} onClick={(e) => { e.stopPropagation(); setAnotacaoEditando(m.id); }}><Edit3 size={10} /> {anotacoesMotoristas[m.id] ? 'Editar Anotação' : 'Adicionar Anotação'}</button>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* PROGRAMAÇÃO ATUAL */}
-                  {temProgramacao && carga && (
-                    <>
-                      <div style={programacaoContainerStyle}>
-                        <div style={programacaoHeaderStyle}><Truck size={14} color="#888" /><h4 style={programacaoTitleStyle}>Programação Atual</h4>{statusInfo && <span style={programacaoStatusStyle(statusInfo.cor, statusInfo.bg)}>{statusInfo.icon} {statusInfo.label}</span>}</div>
-                        <div style={programacaoInfoStyle}><strong style={{ color: '#FFD700' }}>DT:</strong> {carga.dt || '—'}</div>
-                        <div style={{ ...programacaoInfoStyle, marginTop: '4px' }}><MapPin size={12} color="#FFD700" /><span><strong>Coleta:</strong> {carga.coletaCidade} - {carga.coletaLocal}</span></div>
-                        <div style={programacaoInfoStyle}><Calendar size={12} color="#FFD700" /><span>{carga.coletaData || '—'}</span></div>
-                        <div style={{ ...programacaoInfoStyle, marginTop: '4px' }}><MapPin size={12} color="#22C55E" /><span><strong>Entrega:</strong> {carga.entregaCidade} - {carga.entregaLocal}</span></div>
-                        <div style={programacaoInfoStyle}><Calendar size={12} color="#22C55E" /><span>{carga.entregaData || '—'}</span></div>
-                        <div style={{ ...programacaoInfoStyle, marginTop: '8px', borderTop: '1px solid #1F1F1F', paddingTop: '8px' }}><Truck size={12} color="#888" /><span><strong>Placa Cavalo:</strong> <span style={programacaoPlacaStyle}>{carga.placa || '—'}</span></span></div>
-                        {carga.carreta && <div style={programacaoInfoStyle}><Truck size={12} color="#888" /><span><strong>Placa Carreta:</strong> <span style={programacaoPlacaStyle}>{carga.carreta}</span></span></div>}
-                        <div style={programacaoInfoStyle}><strong>Peso:</strong> {carga.peso || '—'} kg</div>
-                      </div>
-
-                      {/* MONITORAMENTO */}
-                      <div style={monitoriaCardStyle}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}><Activity size={12} color="#FFD700" /><span style={{ fontSize: '10px', fontWeight: 700, color: '#FFD700' }}>MONITORAMENTO</span></div>
-                        <div style={monitoriaRowStyle}><span style={monitoriaLabelStyle}>📡 RASTREADOR:</span><span style={{ ...monitoriaValueStyle, color: statusRastreador === 'online' ? '#22C55E' : '#EF4444' }}>{statusRastreador === 'online' ? '🟢 ONLINE' : '🔴 OFFLINE'}</span></div>
-                        {ignicao && <div style={monitoriaRowStyle}><span style={monitoriaLabelStyle}>🔑 IGNIÇÃO:</span><span style={{ ...monitoriaValueStyle, color: ignicao === 'LIGADO' ? '#22C55E' : '#EF4444' }}>{ignicao === 'LIGADO' ? '🟢 LIGADA' : '🔴 DESLIGADA'}</span></div>}
-                        {localizacaoVeiculo && localizacaoVeiculo !== '—' ? (<div style={monitoriaRowStyle}><span style={monitoriaLabelStyle}>📍 LOCALIZAÇÃO:</span><span style={{ ...monitoriaValueStyle, color: '#22C55E', fontSize: '10px' }}>{localizacaoVeiculo.length > 50 ? localizacaoVeiculo.substring(0, 47) + '...' : localizacaoVeiculo}</span></div>) : <div style={monitoriaRowStyle}><span style={monitoriaLabelStyle}>📍 LOCALIZAÇÃO:</span><span style={{ ...monitoriaValueStyle, color: '#666' }}>Não disponível</span></div>}
-                        <div style={monitoriaRowStyle}><span style={monitoriaLabelStyle}><Gauge size={10} style={{ display: 'inline', marginRight: '4px' }} /> 🏎️ VELOCIDADE:</span><span style={{ ...monitoriaValueStyle, color: getVelocidadeColor(velocidadeVeiculo), fontWeight: velocidadeVeiculo > 80 ? 800 : 600, fontSize: velocidadeVeiculo > 80 ? '13px' : '11px' }}>{getVelocidadeIcon(velocidadeVeiculo)} {velocidadeVeiculo > 0 ? `${velocidadeVeiculo} km/h` : 'Parado'}{velocidadeVeiculo > 80 && <span style={{ marginLeft: '6px', backgroundColor: '#EF4444', color: '#FFF', padding: '2px 6px', borderRadius: '4px', fontSize: '8px', fontWeight: 800 }}>EXCESSO!</span>}</span></div>
-                        <div style={monitoriaRowStyle}><span style={monitoriaLabelStyle}>🕐 ÚLTIMA ATUALIZAÇÃO:</span><span style={{ ...monitoriaValueStyle, color: '#FFD700' }}>{formatarUltimaAtualizacao(ultimaAtualizacao)}</span></div>
-                        {veiculoData?.ultimaMacro && <div style={monitoriaRowStyle}><span style={monitoriaLabelStyle}>🏷️ ÚLTIMA MACRO:</span><span style={{ ...monitoriaValueStyle, color: '#FFD700' }}>{veiculoData.ultimaMacro}</span></div>}
-                        <div style={monitoriaRowStyle}><span style={monitoriaLabelStyle}>📋 CHECK-IN:</span><span style={{ ...monitoriaValueStyle, color: checkin?.tipo ? '#22C55E' : '#EF4444' }}>{checkin?.tipo ? getCheckinLabel(checkin.tipo) : 'Aguardando check-in'}</span></div>
-                        {checkin?.dataHora && <div style={monitoriaRowStyle}><span style={monitoriaLabelStyle}>⏰ DATA/HORA:</span><span style={monitoriaValueStyle}>{checkin.dataHora}</span></div>}
-                        {checkin?.pontualidade && <div style={monitoriaRowStyle}><span style={monitoriaLabelStyle}>⏱️ PONTUALIDADE:</span><span style={{ ...monitoriaValueStyle, color: checkin.pontualidade === 'On Time' ? '#22C55E' : '#EF4444' }}>{checkin.pontualidade}</span></div>}
-                        {checkin?.localizacaoReal && <div style={monitoriaRowStyle}><span style={monitoriaLabelStyle}>📍 LOCALIZAÇÃO CHECK-IN:</span><span style={monitoriaValueStyle}>{checkin.localizacaoReal}</span></div>}
-                        <div style={buttonGroupStyle}>
-                          {checkin?.fotoUrl && <button style={{ ...smallButtonStyle, backgroundColor: '#3B82F620', color: '#3B82F6', border: '1px solid #3B82F6' }} onClick={(e) => { e.stopPropagation(); setSelectedPhoto(checkin.fotoUrl!); setShowPhotoModal(true); }}><Camera size={12} /> Ver Foto Check-in</button>}
-                          {canhotos && canhotos.length > 0 && <button style={{ ...smallButtonStyle, backgroundColor: '#FFD70020', color: '#FFD700', border: '1px solid #FFD700' }} onClick={(e) => { e.stopPropagation(); setCanhotosModalData({ canhotos, cargaNome: m.nome }); setShowCanhotosModal(true); }}><Images size={12} /> Ver {canhotos.length} Canhoto(s)</button>}
-                          {isLoadingCanhotos && <span style={{ fontSize: '10px', color: '#AAA' }}>Carregando...</span>}
-                        </div>
-                      </div>
-
-                      {/* AÇÕES DA CARGA */}
-                      <div style={actionButtonsStyle}>
-                        <button style={{ ...actionButtonStyle, backgroundColor: '#3B82F620', color: '#3B82F6', borderColor: '#3B82F6' }} onClick={(e) => { e.stopPropagation(); if (carga) { setEditandoCarga(carga); setShowEditCargaModal(true); } }}><Edit3 size={14} /> Editar Carga</button>
-                        <button style={{ ...actionButtonStyle, backgroundColor: '#EF444420', color: '#EF4444', borderColor: '#EF4444' }} onClick={(e) => { e.stopPropagation(); if (carga) { handleExcluirCarga(carga); } }}><Trash2 size={14} /> Excluir Carga</button>
-                        <button style={{ ...actionButtonStyle, backgroundColor: '#22C55E20', color: '#22C55E', borderColor: '#22C55E' }} onClick={(e) => { e.stopPropagation(); if (carga) { setSelectedCargaForStatus(carga); setNewStatus(carga.status); setShowStatusModal(true); } }}><RotateCcw size={14} /> Alterar Status</button>
-                        <button style={{ ...actionButtonStyle, backgroundColor: '#FFD70020', color: '#FFD700', borderColor: '#FFD700' }} onClick={(e) => { e.stopPropagation(); if (carga) { handleFinalizarCarga(carga); } }}><Flag size={14} /> Finalizar Carga</button>
-                      </div>
-                    </>
-                  )}
-
-                  {/* STATUS QUANDO SEM PROGRAMAÇÃO */}
-                  {!temProgramacao && (
-                    <div style={{ padding: '12px', borderRadius: '12px', marginBottom: '16px', textAlign: 'center', backgroundColor: statusMotorista.bg, border: `1px solid ${statusMotorista.cor}` }}>
-                      <span style={{ fontSize: '24px', marginRight: '8px' }}>{statusMotorista.icon}</span>
-                      <span style={{ fontWeight: 700, color: statusMotorista.cor, fontSize: '14px' }}>{statusMotorista.label}</span>
-                      {statusMotorista.value === 'folga' && <div style={{ fontSize: '11px', color: '#888', marginTop: '4px' }}>{eventoHoje?.tipo === 'Descanso Semanal' ? 'Descanso semanal - Não programar' : 'Férias - Não programar'}</div>}
-                      {isDisponivelParaProgramar && !carga && <div style={{ fontSize: '11px', color: '#22C55E', marginTop: '4px' }}>✅ Motorista está disponível para nova programação</div>}
+                return (
+                  <div key={m.id} onClick={(e) => handleCardClick(m, e)} style={cardStyle}>
+                    <div style={{ ...fotoWrapperStyle, background: `linear-gradient(135deg, ${getRandomColor(m.id)}, #1a1a1a)` }}>
+                      {m.fotoPerfilUrl ? <img src={m.fotoPerfilUrl} alt={m.nome} style={fotoStyle} /> : <div style={initialsStyle}>{getInitials(m.nome)}</div>}
+                      <div style={moppBadgeStyle}>{m.temMopp === 'Sim' ? '✅ MOPP' : '❌ Sem MOPP'}</div>
                     </div>
-                  )}
+                    <div style={contentStyle}>
+                      <h3 style={nomeStyle}>{m.nome}</h3>
+                      <p style={cpfStyle}>{m.cpf}</p>
+                      <div style={infoEscalaCardStyle}><div style={infoEscalaRowStyle}><span style={infoEscalaLabelStyle}><Clock size={10} style={{ marginRight: '4px' }} /> Dias consecutivos</span><span style={infoEscalaValueStyle}>{escalaInfo.diasConsecutivosTrabalhados}</span></div></div>
+                      <div style={infoGridStyle}>
+                        <div style={infoItemStyle}><MapPin size={12} color="#FFD700" /><span><strong>Cidade:</strong> {m.cidade || 'Não informada'}</span></div>
+                        <div style={infoItemStyle}><span>📱</span><span><strong>Telefone:</strong> {m.whatsapp || m.telefone || 'Não informado'}</span></div>
+                      </div>
+                      <div style={{ ...infoItemStyle, marginBottom: '12px' }}><span>🚛</span><span><strong>Viagens Realizadas:</strong> {m.viagensRealizadas || 0}</span></div>
 
-                  {/* BOTÕES DE AÇÃO DO MOTORISTA - WHATSAPP INTEGRATION */}
-                  <div style={actionButtonsStyle}>
-                    {/* Botão WhatsApp Web - Abre conversa direta no navegador */}
-                    <button style={{ ...actionButtonStyle, backgroundColor: '#25D36620', color: '#25D366', borderColor: '#25D366' }} onClick={(e) => { e.stopPropagation(); abrirWhatsAppWeb(m.whatsapp || m.telefone, m.nome); }}>
-                      <MessageCircle size={14} /> WhatsApp Web
-                    </button>
-                    
-                    {/* Botão Enviar Mensagem - Modal com envio via servidor (requer backend) */}
-                    {whatsappReady && (
-                      <button style={{ ...actionButtonStyle, backgroundColor: '#075E5420', color: '#075E54', borderColor: '#075E54' }} onClick={(e) => { e.stopPropagation(); abrirWhatsAppChat(m.whatsapp || m.telefone, m.nome); }}>
-                        <MessageCircle size={14} /> Enviar Mensagem
-                      </button>
-                    )}
-                    
-                    {/* Botão Histórico - Abre histórico de conversas */}
-                    <button style={{ ...actionButtonStyle, backgroundColor: '#3B82F620', color: '#3B82F6', borderColor: '#3B82F6' }} onClick={(e) => { e.stopPropagation(); abrirWhatsAppHistorico(m.whatsapp || m.telefone, m.nome); }}>
-                      <MessageCircle size={14} /> Histórico
-                    </button>
-                    
-                    <button style={actionButtonStyle} onClick={() => onSelectMotorista(m.id)}><UserCheck size={14} /> Ver Detalhes</button>
-                    <button style={{ ...actionButtonStyle, backgroundColor: '#EF444420', color: '#EF4444', borderColor: '#EF4444' }} onClick={() => setShowDeleteConfirm(m.id)}><UserMinus size={14} /> Excluir</button>
-                    <button onClick={() => { setMapaModalMotorista({ id: m.id, nome: m.nome, placa: placaVeiculo || undefined, veiculoId: carga?.veiculo || undefined, coordenadas: coordenadasVeiculo || undefined, ultimaLocalizacao: localizacaoVeiculo || veiculoData?.ultimaLocalizacao || undefined, ultimoEndereco: localizacaoVeiculo || veiculoData?.ultimaLocalizacao || undefined, ultimaAtualizacao: veiculoData?.ultimaAtualizacaoRastreador, status: veiculoData?.statusRastreador, ultimaMacro: veiculoData?.ultimaMacro || undefined }); }} style={{ ...actionButtonStyle, backgroundColor: coordenadasVeiculo?.lat && coordenadasVeiculo?.lng ? '#3B82F6' : '#555', color: '#FFF', borderColor: coordenadasVeiculo?.lat && coordenadasVeiculo?.lng ? '#3B82F6' : '#555', opacity: coordenadasVeiculo?.lat && coordenadasVeiculo?.lng ? 1 : 0.5 }} disabled={!coordenadasVeiculo?.lat || !coordenadasVeiculo?.lng} title={!coordenadasVeiculo?.lat || !coordenadasVeiculo?.lng ? 'Coordenadas não disponíveis' : 'Ver no mapa'}><Navigation size={14} /> Ver Localização</button>
+                      {/* ANOTAÇÕES */}
+                      <div style={anotacaoContainerStyle}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}><span style={{ fontSize: '10px', color: '#FFD700' }}>📝</span><span style={{ fontSize: '10px', fontWeight: 700, color: '#FFD700' }}>ANOTAÇÕES</span></div>
+                        {anotacaoEditando === m.id ? (
+                          <div>
+                            <textarea style={anotacaoInputStyle} rows={3} placeholder="Ex: motorista com restrição médica, aguardando documentação..." defaultValue={anotacoesMotoristas[m.id] || ''} id={`anotacao_${m.id}`} />
+                            <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+                              <button style={{ ...smallButtonStyle, backgroundColor: '#22C55E', color: '#000' }} onClick={(e) => { e.stopPropagation(); const textarea = document.getElementById(`anotacao_${m.id}`) as HTMLTextAreaElement; if (textarea) salvarAnotacao(m.id, textarea.value); }}><Save size={10} /> Salvar</button>
+                              <button style={{ ...smallButtonStyle, backgroundColor: '#EF4444', color: '#FFF' }} onClick={(e) => { e.stopPropagation(); setAnotacaoEditando(null); }}>Cancelar</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div>
+                            <p style={anotacaoTextStyle}>{anotacoesMotoristas[m.id] || 'Nenhuma anotação cadastrada'}</p>
+                            <button style={{ ...smallButtonStyle, backgroundColor: '#FFD70020', color: '#FFD700', border: '1px solid #FFD700' }} onClick={(e) => { e.stopPropagation(); setAnotacaoEditando(m.id); }}><Edit3 size={10} /> {anotacoesMotoristas[m.id] ? 'Editar Anotação' : 'Adicionar Anotação'}</button>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* PROGRAMAÇÃO ATUAL */}
+                      {temProgramacao && carga && (
+                        <>
+                          <div style={programacaoContainerStyle}>
+                            <div style={programacaoHeaderStyle}><Truck size={14} color="#888" /><h4 style={programacaoTitleStyle}>Programação Atual</h4>{statusInfo && <span style={programacaoStatusStyle(statusInfo.cor, statusInfo.bg)}>{statusInfo.icon} {statusInfo.label}</span>}</div>
+                            <div style={programacaoInfoStyle}><strong style={{ color: '#FFD700' }}>DT:</strong> {carga.dt || '—'}</div>
+                            <div style={{ ...programacaoInfoStyle, marginTop: '4px' }}><MapPin size={12} color="#FFD700" /><span><strong>Coleta:</strong> {carga.coletaCidade} - {carga.coletaLocal}</span></div>
+                            <div style={programacaoInfoStyle}><Calendar size={12} color="#FFD700" /><span>{carga.coletaData || '—'}</span></div>
+                            <div style={{ ...programacaoInfoStyle, marginTop: '4px' }}><MapPin size={12} color="#22C55E" /><span><strong>Entrega:</strong> {carga.entregaCidade} - {carga.entregaLocal}</span></div>
+                            <div style={programacaoInfoStyle}><Calendar size={12} color="#22C55E" /><span>{carga.entregaData || '—'}</span></div>
+                            <div style={{ ...programacaoInfoStyle, marginTop: '8px', borderTop: '1px solid #1F1F1F', paddingTop: '8px' }}><Truck size={12} color="#888" /><span><strong>Placa Cavalo:</strong> <span style={programacaoPlacaStyle}>{carga.placa || '—'}</span></span></div>
+                            {carga.carreta && <div style={programacaoInfoStyle}><Truck size={12} color="#888" /><span><strong>Placa Carreta:</strong> <span style={programacaoPlacaStyle}>{carga.carreta}</span></span></div>}
+                            <div style={programacaoInfoStyle}><strong>Peso:</strong> {carga.peso || '—'} kg</div>
+                          </div>
+
+                          {/* MONITORAMENTO */}
+                          <div style={monitoriaCardStyle}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}><Activity size={12} color="#FFD700" /><span style={{ fontSize: '10px', fontWeight: 700, color: '#FFD700' }}>MONITORAMENTO</span></div>
+                            <div style={monitoriaRowStyle}><span style={monitoriaLabelStyle}>📡 RASTREADOR:</span><span style={{ ...monitoriaValueStyle, color: statusRastreador === 'online' ? '#22C55E' : '#EF4444' }}>{statusRastreador === 'online' ? '🟢 ONLINE' : '🔴 OFFLINE'}</span></div>
+                            {ignicao && <div style={monitoriaRowStyle}><span style={monitoriaLabelStyle}>🔑 IGNIÇÃO:</span><span style={{ ...monitoriaValueStyle, color: ignicao === 'LIGADO' ? '#22C55E' : '#EF4444' }}>{ignicao === 'LIGADO' ? '🟢 LIGADA' : '🔴 DESLIGADA'}</span></div>}
+                            {localizacaoVeiculo && localizacaoVeiculo !== '—' ? (<div style={monitoriaRowStyle}><span style={monitoriaLabelStyle}>📍 LOCALIZAÇÃO:</span><span style={{ ...monitoriaValueStyle, color: '#22C55E', fontSize: '10px' }}>{localizacaoVeiculo.length > 50 ? localizacaoVeiculo.substring(0, 47) + '...' : localizacaoVeiculo}</span></div>) : <div style={monitoriaRowStyle}><span style={monitoriaLabelStyle}>📍 LOCALIZAÇÃO:</span><span style={{ ...monitoriaValueStyle, color: '#666' }}>Não disponível</span></div>}
+                            <div style={monitoriaRowStyle}><span style={monitoriaLabelStyle}><Gauge size={10} style={{ display: 'inline', marginRight: '4px' }} /> 🏎️ VELOCIDADE:</span><span style={{ ...monitoriaValueStyle, color: getVelocidadeColor(velocidadeVeiculo), fontWeight: velocidadeVeiculo > 80 ? 800 : 600, fontSize: velocidadeVeiculo > 80 ? '13px' : '11px' }}>{getVelocidadeIcon(velocidadeVeiculo)} {velocidadeVeiculo > 0 ? `${velocidadeVeiculo} km/h` : 'Parado'}{velocidadeVeiculo > 80 && <span style={{ marginLeft: '6px', backgroundColor: '#EF4444', color: '#FFF', padding: '2px 6px', borderRadius: '4px', fontSize: '8px', fontWeight: 800 }}>EXCESSO!</span>}</span></div>
+                            <div style={monitoriaRowStyle}><span style={monitoriaLabelStyle}>🕐 ÚLTIMA ATUALIZAÇÃO:</span><span style={{ ...monitoriaValueStyle, color: '#FFD700' }}>{formatarUltimaAtualizacao(ultimaAtualizacao)}</span></div>
+                            {veiculoData?.ultimaMacro && <div style={monitoriaRowStyle}><span style={monitoriaLabelStyle}>🏷️ ÚLTIMA MACRO:</span><span style={{ ...monitoriaValueStyle, color: '#FFD700' }}>{veiculoData.ultimaMacro}</span></div>}
+                            
+                            {/* NOVO: ROTA DO MONISAT */}
+                            {rotaMonisat && (
+                              <>
+                                <div style={{ ...monitoriaRowStyle, borderTop: '1px solid #2A2A2A', marginTop: '4px', paddingTop: '8px' }}>
+                                  <span style={monitoriaLabelStyle}><Route size={10} style={{ display: 'inline', marginRight: '4px' }} /> 🛣️ ROTA MONISAT:</span>
+                                  <span className="rota-text" style={{ ...monitoriaValueStyle, color: '#FFD700', fontSize: '10px', maxWidth: '70%', textAlign: 'right' }}>
+                                    {rotaMonisat}
+                                  </span>
+                                </div>
+                                {ultimaAtualizacaoRota && (
+                                  <div style={monitoriaRowStyle}>
+                                    <span style={monitoriaLabelStyle}>🕐 ATUALIZAÇÃO ROTA:</span>
+                                    <span style={{ ...monitoriaValueStyle, color: '#888', fontSize: '9px' }}>
+                                      {formatarUltimaAtualizacaoRota(ultimaAtualizacaoRota)}
+                                    </span>
+                                  </div>
+                                )}
+                              </>
+                            )}
+                            
+                            <div style={monitoriaRowStyle}><span style={monitoriaLabelStyle}>📋 CHECK-IN:</span><span style={{ ...monitoriaValueStyle, color: checkin?.tipo ? '#22C55E' : '#EF4444' }}>{checkin?.tipo ? getCheckinLabel(checkin.tipo) : 'Aguardando check-in'}</span></div>
+                            {checkin?.dataHora && <div style={monitoriaRowStyle}><span style={monitoriaLabelStyle}>⏰ DATA/HORA:</span><span style={monitoriaValueStyle}>{checkin.dataHora}</span></div>}
+                            {checkin?.pontualidade && <div style={monitoriaRowStyle}><span style={monitoriaLabelStyle}>⏱️ PONTUALIDADE:</span><span style={{ ...monitoriaValueStyle, color: checkin.pontualidade === 'On Time' ? '#22C55E' : '#EF4444' }}>{checkin.pontualidade}</span></div>}
+                            {checkin?.localizacaoReal && <div style={monitoriaRowStyle}><span style={monitoriaLabelStyle}>📍 LOCALIZAÇÃO CHECK-IN:</span><span style={monitoriaValueStyle}>{checkin.localizacaoReal}</span></div>}
+                            <div style={buttonGroupStyle}>
+                              {checkin?.fotoUrl && <button style={{ ...smallButtonStyle, backgroundColor: '#3B82F620', color: '#3B82F6', border: '1px solid #3B82F6' }} onClick={(e) => { e.stopPropagation(); setSelectedPhoto(checkin.fotoUrl!); setShowPhotoModal(true); }}><Camera size={12} /> Ver Foto Check-in</button>}
+                              {canhotos && canhotos.length > 0 && <button style={{ ...smallButtonStyle, backgroundColor: '#FFD70020', color: '#FFD700', border: '1px solid #FFD700' }} onClick={(e) => { e.stopPropagation(); setCanhotosModalData({ canhotos, cargaNome: m.nome }); setShowCanhotosModal(true); }}><Images size={12} /> Ver {canhotos.length} Canhoto(s)</button>}
+                              {isLoadingCanhotos && <span style={{ fontSize: '10px', color: '#AAA' }}>Carregando...</span>}
+                            </div>
+                          </div>
+
+                          {/* AÇÕES DA CARGA */}
+                          <div style={actionButtonsStyle}>
+                            <button style={{ ...actionButtonStyle, backgroundColor: '#3B82F620', color: '#3B82F6', borderColor: '#3B82F6' }} onClick={(e) => { e.stopPropagation(); if (carga) { setEditandoCarga(carga); setShowEditCargaModal(true); } }}><Edit3 size={14} /> Editar Carga</button>
+                            <button style={{ ...actionButtonStyle, backgroundColor: '#EF444420', color: '#EF4444', borderColor: '#EF4444' }} onClick={(e) => { e.stopPropagation(); if (carga) { handleExcluirCarga(carga); } }}><Trash2 size={14} /> Excluir Carga</button>
+                            <button style={{ ...actionButtonStyle, backgroundColor: '#22C55E20', color: '#22C55E', borderColor: '#22C55E' }} onClick={(e) => { e.stopPropagation(); if (carga) { setSelectedCargaForStatus(carga); setNewStatus(carga.status); setShowStatusModal(true); } }}><RotateCcw size={14} /> Alterar Status</button>
+                            <button style={{ ...actionButtonStyle, backgroundColor: '#FFD70020', color: '#FFD700', borderColor: '#FFD700' }} onClick={(e) => { e.stopPropagation(); if (carga) { handleFinalizarCarga(carga); } }}><Flag size={14} /> Finalizar Carga</button>
+                          </div>
+                        </>
+                      )}
+
+                      {/* STATUS QUANDO SEM PROGRAMAÇÃO */}
+                      {!temProgramacao && (
+                        <div style={{ padding: '12px', borderRadius: '12px', marginBottom: '16px', textAlign: 'center', backgroundColor: statusMotorista.bg, border: `1px solid ${statusMotorista.cor}` }}>
+                          <span style={{ fontSize: '24px', marginRight: '8px' }}>{statusMotorista.icon}</span>
+                          <span style={{ fontWeight: 700, color: statusMotorista.cor, fontSize: '14px' }}>{statusMotorista.label}</span>
+                          {statusMotorista.value === 'folga' && <div style={{ fontSize: '11px', color: '#888', marginTop: '4px' }}>{eventoHoje?.tipo === 'Descanso Semanal' ? 'Descanso semanal - Não programar' : 'Férias - Não programar'}</div>}
+                          {isDisponivelParaProgramar && !carga && <div style={{ fontSize: '11px', color: '#22C55E', marginTop: '4px' }}>✅ Motorista está disponível para nova programação</div>}
+                        </div>
+                      )}
+
+                      {/* BOTÕES DE AÇÃO DO MOTORISTA */}
+                      <div style={actionButtonsStyle}>
+                        <button 
+                          style={{ ...actionButtonStyle, backgroundColor: '#25D36620', color: '#25D366', borderColor: '#25D366' }} 
+                          onClick={(e) => { 
+                            e.stopPropagation(); 
+                            abrirWhatsAppChat(m.whatsapp || m.telefone, m.nome); 
+                          }}
+                        >
+                          <MessageCircle size={14} /> Conversar / Histórico
+                        </button>
+                        
+                        <button style={actionButtonStyle} onClick={() => onSelectMotorista(m.id)}><UserCheck size={14} /> Ver Detalhes</button>
+                        <button style={{ ...actionButtonStyle, backgroundColor: '#EF444420', color: '#EF4444', borderColor: '#EF4444' }} onClick={() => setShowDeleteConfirm(m.id)}><UserMinus size={14} /> Excluir</button>
+                        <button onClick={() => { setMapaModalMotorista({ id: m.id, nome: m.nome, placa: placaVeiculo || undefined, veiculoId: carga?.veiculo || undefined, coordenadas: coordenadasVeiculo || undefined, ultimaLocalizacao: localizacaoVeiculo || veiculoData?.ultimaLocalizacao || undefined, ultimoEndereco: localizacaoVeiculo || veiculoData?.ultimaLocalizacao || undefined, ultimaAtualizacao: veiculoData?.ultimaAtualizacaoRastreador, status: veiculoData?.statusRastreador, ultimaMacro: veiculoData?.ultimaMacro || undefined, rotaMonisat: rotaMonisat || undefined }); }} style={{ ...actionButtonStyle, backgroundColor: coordenadasVeiculo?.lat && coordenadasVeiculo?.lng ? '#3B82F6' : '#555', color: '#FFF', borderColor: coordenadasVeiculo?.lat && coordenadasVeiculo?.lng ? '#3B82F6' : '#555', opacity: coordenadasVeiculo?.lat && coordenadasVeiculo?.lng ? 1 : 0.5 }} disabled={!coordenadasVeiculo?.lat || !coordenadasVeiculo?.lng} title={!coordenadasVeiculo?.lat || !coordenadasVeiculo?.lng ? 'Coordenadas não disponíveis' : 'Ver no mapa'}><Navigation size={14} /> Ver Localização</button>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+                );
+              })}
+            </div>
+          )}
+        </>
+      ) : (
+        <VisaoMapa 
+          motoristas={motoristasParaMapa}
+          onSelectMotorista={onSelectMotorista}
+          onRefresh={() => {
+            console.log('Refresh mapa');
+          }}
+          loading={loadingData}
+        />
       )}
 
       {/* MODAIS - EDITAR CARGA, ALTERAR STATUS, EXCLUIR, FOTO, CANHOTOS, MAPA */}
@@ -1505,16 +1591,7 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
 
       {mapaModalMotorista && <MotoristaMapaModal key={mapaModalMotorista.id} isOpen={true} onClose={() => setMapaModalMotorista(null)} motorista={mapaModalMotorista} />}
 
-      {/* WHATSAPP HISTÓRICO */}
-      <WhatsAppHistorico 
-        isOpen={whatsappHistoricoOpen.open}
-        onClose={() => setWhatsappHistoricoOpen({ open: false, telefone: '', nome: '' })}
-        telefone={whatsappHistoricoOpen.telefone}
-        nome={whatsappHistoricoOpen.nome}
-        sendMessage={sendWhatsAppMessage}
-      />
-
-      {/* WHATSAPP CHAT MODAL (Enviar Mensagem) */}
+      {/* MODAL ÚNICO - WHATSAPP CHAT/HISTÓRICO */}
       <WhatsAppChatModal
         isOpen={whatsappChatModalOpen.open}
         onClose={() => setWhatsappChatModalOpen({ open: false, telefone: '', nome: '' })}

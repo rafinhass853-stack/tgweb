@@ -4,8 +4,9 @@ const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
 
-// Função para converter placa
+// Função para converter placa (adicionar traço)
 function converterPlaca(placaMonisat) {
+  if (!placaMonisat) return placaMonisat;
   let placa = placaMonisat.replace(/-/g, '');
   if (placa.length === 7) {
     return `${placa.substring(0, 3)}-${placa.substring(3)}`;
@@ -21,109 +22,123 @@ if (admin.apps.length === 0) {
 const db = admin.firestore();
 console.log('✅ Firebase inicializado');
 
-// Vamos listar as coleções para debug
-async function listarColecoes() {
-  console.log('\n📁 Coleções no Firestore:');
-  const collections = await db.listCollections();
-  collections.forEach(col => console.log(`   - ${col.id}`));
-}
-
 const CONFIG = {
-  url: 'https://site.monisat.com.br/index.php',
-  user: 'TG',
-  loginName: 'RAFAEL',
-  password: 'ARAUJO',
-  headless: process.env.HEADLESS === 'true'
+  url: process.env.MONISAT_URL || 'https://site.monisat.com.br/index.php',
+  user: process.env.MONISAT_USER || 'TG',
+  loginName: process.env.MONISAT_LOGIN_NAME || 'RAFAEL',
+  password: process.env.MONISAT_PASSWORD || 'ARAUJO',
+  headless: process.env.MONISAT_HEADLESS === 'true' || false
 };
 
-async function capturarLocalizacoes() {
-  console.log('\n🚀 INICIANDO CAPTURA MONISAT\n');
-  
-  // Listar coleções para debug
-  await listarColecoes();
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+async function capturarRotas() {
+  console.log('\n' + '='.repeat(60));
+  console.log('🚀 INICIANDO CAPTURA MONISAT - ROTAS POR PLACA');
+  console.log('📅 ' + new Date().toLocaleString());
+  console.log('='.repeat(60) + '\n');
   
   let browser = null;
   
   try {
     browser = await puppeteer.launch({
-      headless: false,  // Deixe false para ver o que acontece
-      args: ['--no-sandbox', '--start-maximized']
+      headless: CONFIG.headless,
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--start-maximized']
     });
     
     const page = await browser.newPage();
     await page.setViewport({ width: 1366, height: 768 });
     
     // LOGIN
-    console.log('📝 Fazendo login...');
-    await page.goto(CONFIG.url, { waitUntil: 'networkidle2' });
-    await new Promise(r => setTimeout(r, 3000));
+    console.log('📝 Fazendo login no MONISAT...');
+    await page.goto(CONFIG.url, { waitUntil: 'networkidle2', timeout: 30000 });
+    await delay(3000);
     
-    const inputs = await page.$$('input');
-    if (inputs.length >= 3) {
-      await inputs[0].type(CONFIG.user);
-      await inputs[1].type(CONFIG.loginName);
-      await inputs[2].type(CONFIG.password);
-    }
+    await page.evaluate((user, loginName, password) => {
+      const inputs = Array.from(document.querySelectorAll('input'));
+      if (inputs.length >= 3) {
+        inputs[0].value = user;
+        inputs[1].value = loginName;
+        inputs[2].value = password;
+      }
+    }, CONFIG.user, CONFIG.loginName, CONFIG.password);
     
     const botoes = await page.$$('button, input[type="submit"]');
-    if (botoes.length > 0) await botoes[0].click();
+    if (botoes.length > 0) {
+      await botoes[0].click();
+      console.log('✅ Botão de login clicado');
+    }
     
-    await new Promise(r => setTimeout(r, 5000));
+    await delay(8000);
     console.log('✅ Login OK');
     
     // ACESSAR GRID
     console.log('📊 Acessando Grid...');
-    
     await page.evaluate(() => {
-      const elementos = Array.from(document.querySelectorAll('a, button, div, span'));
-      const grid = elementos.find(el => 
-        el.innerText && el.innerText.trim().toLowerCase() === 'grid'
-      );
-      if (grid) grid.click();
+      const links = Array.from(document.querySelectorAll('a'));
+      const gridLink = links.find(a => a.innerText?.trim() === 'Grid');
+      if (gridLink) gridLink.click();
     });
     
-    await new Promise(r => setTimeout(r, 5000));
+    await delay(5000);
     console.log('✅ Grid acessado');
     
-    // EXTRAIR PLACAS E LOCALIZAÇÕES
-    console.log('📊 Extraindo placas e localizações...');
-    await new Promise(r => setTimeout(r, 3000));
+    // Aguardar tabela carregar
+    console.log('📊 Aguardando tabela de veículos...');
+    await delay(3000);
     
+    // EXTRAIR DADOS
     const dadosVeiculos = await page.evaluate(() => {
       const resultados = [];
-      const linhas = document.querySelectorAll('tr');
       
-      for (let linha of linhas) {
-        const texto = linha.innerText;
-        
-        // Pegar todas as placas possíveis
-        const placasEncontradas = texto.match(/[A-Z]{3}[0-9]{4}|[A-Z]{3}[0-9][A-Z][0-9]{2}/g) || [];
-        
-        for (let placa of placasEncontradas) {
-          // Ignorar códigos internos
-          const prefixosIgnorar = ['IDV', 'DSM', 'ATA', 'CZZ', 'CDL', 'EOF', 'FYI', 'AUD', 'EGJ', 'EGK', 'ETU', 'GDS', 'BPK', 'CUB', 'FSN', 'HJZ', 'ECZ', 'GIJ', 'BPZ', 'EJZ', 'PVB', 'IUS', 'CZB', 'DSK', 'DJC', 'AHY', 'GEU', 'MHY', 'BSY', 'BYI', 'AEX', 'FVC', 'FRD', 'DYT', 'FVH', 'DGY', 'GFG', 'GJE', 'FGL', 'GKB', 'GBD', 'BPQ', 'BYY', 'HMV', 'GEI', 'FWO', 'FRF'];
-          
-          const isIgnorar = prefixosIgnorar.some(prefix => placa.startsWith(prefix));
-          
-          if (!isIgnorar && placa.length >= 7) {
-            let localizacao = '';
-            
-            const cidadeMatch = texto.match(/[A-Z]{2}\s*[-–]\s*[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*/);
-            if (cidadeMatch) {
-              localizacao = cidadeMatch[0];
-            } else {
-              const spMatch = texto.match(/SP\s*[-–]\s*([A-Z\s]+)/i);
-              if (spMatch) localizacao = `SP - ${spMatch[1].trim()}`;
-              
-              const rjMatch = texto.match(/RJ\s*[-–]\s*([A-Z\s]+)/i);
-              if (rjMatch) localizacao = `RJ - ${rjMatch[1].trim()}`;
-              
-              const mgMatch = texto.match(/MG\s*[-–]\s*([A-Z\s]+)/i);
-              if (mgMatch) localizacao = `MG - ${mgMatch[1].trim()}`;
+      function limparTexto(texto) {
+        if (!texto) return '';
+        // Remove padrões como &MM1>&MR0... e &IDV...
+        let limpo = texto.replace(/&[A-Z0-9]+>/g, ' ');
+        limpo = limpo.replace(/&[A-Z0-9]+/g, ' ');
+        limpo = limpo.replace(/\s+/g, ' ').trim();
+        return limpo;
+      }
+      
+      function extrairPlaca(texto) {
+        const match = texto.match(/[A-Z]{3}[0-9]{4}|[A-Z]{3}[0-9][A-Z][0-9]{2}/g);
+        if (match) {
+          const prefixosCarreta = ['IDV', 'DSM', 'ATA', 'CZZ', 'CDL', 'EOF'];
+          for (const p of match) {
+            if (!prefixosCarreta.some(pre => p.startsWith(pre))) {
+              return p.length === 7 ? `${p.substring(0, 3)}-${p.substring(3)}` : p;
             }
+          }
+        }
+        return null;
+      }
+
+      const tables = document.querySelectorAll('table');
+      for (const table of tables) {
+        const rows = table.querySelectorAll('tr');
+        for (const row of rows) {
+          const cells = Array.from(row.querySelectorAll('td'));
+          if (cells.length >= 5) {
+            const textoCompleto = cells.map(c => c.innerText).join(' ');
+            const placa = extrairPlaca(textoCompleto);
             
-            resultados.push({ placa: placa, localizacao: localizacao || 'Localização não disponível' });
-            break;
+            // --- AJUSTE NA LÓGICA DA ROTA ---
+            // Procuramos em todas as células da linha pela que contém o separador " X "
+            let rotaBruta = "";
+            const celulaComRota = cells.find(c => c.innerText.includes(' X '));
+            
+            if (celulaComRota) {
+              rotaBruta = celulaComRota.innerText;
+            } else {
+              // Se não achou o " X ", tenta pegar a célula que tem o maior texto (provavelmente a rota)
+              rotaBruta = cells.reduce((prev, curr) => prev.innerText.length > curr.innerText.length ? prev : curr).innerText;
+            }
+
+            const rotaLimpa = limparTexto(rotaBruta);
+
+            if (placa && rotaLimpa.length > 10) {
+              resultados.push({ placa: placa, rota: rotaLimpa });
+            }
           }
         }
       }
@@ -131,87 +146,56 @@ async function capturarLocalizacoes() {
       // Remover duplicatas
       const unique = [];
       const placasVistas = new Set();
-      for (let v of resultados) {
+      for (const v of resultados) {
         if (!placasVistas.has(v.placa)) {
           placasVistas.add(v.placa);
           unique.push(v);
         }
       }
-      
       return unique;
     });
     
-    console.log(`✅ Encontrados ${dadosVeiculos.length} veículos`);
+    console.log(`✅ Encontrados ${dadosVeiculos.length} veículos com rota válida`);
     
     if (dadosVeiculos.length === 0) {
-      console.log('⚠️ Nenhum veículo encontrado');
+      console.log('⚠️ Nenhum veículo com rota válida encontrado');
       return;
     }
     
-    console.log('\n📋 Primeiros veículos:');
-    dadosVeiculos.slice(0, 10).forEach(v => {
-      console.log(`   ${v.placa} : ${v.localizacao}`);
-    });
-    
-    // ATUALIZAR FIRESTORE - Tentar com e sem traço
+    // ATUALIZAR FIRESTORE
     console.log('\n📝 Atualizando Firebase...');
-    
-    // Determinar o nome correto da coleção
-    const nomeColecao = 'veiculos'; // sem acento
-    
+    const nomeColecao = 'veiculos';
     let atualizados = 0;
-    let naoEncontrados = 0;
     
     for (const veiculo of dadosVeiculos) {
       try {
-        // Tentar buscar com a placa original (sem traço)
+        const placaOriginal = veiculo.placa;
+        const placaSemTraco = placaOriginal.replace(/-/g, '');
+        
         let querySnapshot = await db.collection(nomeColecao)
-          .where('placa', '==', veiculo.placa)
-          .limit(1)
-          .get();
+          .where('placa', '==', placaOriginal)
+          .limit(1).get();
         
-        // Se não achou, tentar com traço
         if (querySnapshot.empty) {
-          const placaComTraco = converterPlaca(veiculo.placa);
           querySnapshot = await db.collection(nomeColecao)
-            .where('placa', '==', placaComTraco)
-            .limit(1)
-            .get();
-        }
-        
-        // Se não achou, tentar pelo ID do documento
-        if (querySnapshot.empty) {
-          const docRef = db.collection(nomeColecao).doc(veiculo.placa);
-          const doc = await docRef.get();
-          if (doc.exists) {
-            querySnapshot = { docs: [doc], empty: false };
-          }
+            .where('placa', '==', placaSemTraco)
+            .limit(1).get();
         }
         
         if (!querySnapshot.empty) {
-          const doc = querySnapshot.docs[0];
-          await doc.ref.update({
-            ultimaLocalizacao: veiculo.localizacao,
-            ultimaAtualizacaoRastreador: admin.firestore.Timestamp.now(),
-            statusRastreador: 'online',
-            ultimaConsulta: new Date().toISOString()
+          await querySnapshot.docs[0].ref.update({
+            rotaMonisat: veiculo.rota,
+            ultimaAtualizacaoRotaMonisat: admin.firestore.Timestamp.now()
           });
           atualizados++;
-          console.log(`✅ ${veiculo.placa} : ${veiculo.localizacao}`);
-        } else {
-          naoEncontrados++;
-          if (naoEncontrados < 20) {
-            console.log(`⚠️ ${veiculo.placa} : Não cadastrado`);
-          }
+          console.log(`✅ ${placaOriginal} atualizada.`);
         }
       } catch (error) {
         console.log(`❌ ${veiculo.placa}: ${error.message}`);
       }
     }
     
-    console.log(`\n📈 RESUMO:`);
-    console.log(`   ✅ Atualizados: ${atualizados}`);
-    console.log(`   ⚠️ Não cadastrados: ${naoEncontrados}`);
+    console.log(`\n📈 RESUMO: ${atualizados} atualizados.`);
     
   } catch (error) {
     console.error('❌ ERRO:', error.message);
@@ -221,5 +205,4 @@ async function capturarLocalizacoes() {
   }
 }
 
-// Executar
-capturarLocalizacoes();
+capturarRotas();

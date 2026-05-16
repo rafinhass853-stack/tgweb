@@ -1,4 +1,3 @@
-// server.js (usando ES Modules)
 import express from 'express';
 import cors from 'cors';
 import http from 'http';

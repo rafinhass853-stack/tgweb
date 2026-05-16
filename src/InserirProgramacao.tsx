@@ -59,6 +59,7 @@ const InserirProgramacao: React.FC = () => {
   const [textoColado, setTextoColado] = useState('');
   const [cargaDetectada, setCargaDetectada] = useState<CargaData | null>(null);
   const [loading, setLoading] = useState(false);
+  const [mensagemErro, setMensagemErro] = useState<string | null>(null);
 
   const parsearCarga = (texto: string) => {
     if (!texto.trim()) { setCargaDetectada(null); return; }
@@ -117,6 +118,48 @@ const InserirProgramacao: React.FC = () => {
     } catch (err) { console.error("Erro no Parse:", err); }
   };
 
+  // 1. Verificar se motorista tem viagem ativa
+  const verificarViagemAtiva = async (motoristaId: string): Promise<boolean> => {
+    const q = query(
+      collection(db, "motoristas", motoristaId, "cargas"),
+      where("statusViagem", "==", "em_andamento")
+    );
+    const snap = await getDocs(q);
+    return !snap.empty;
+  };
+
+  // 2. Verificar se existe DT duplicada
+  const verificarDTDuplicada = async (dt: string): Promise<boolean> => {
+    const motoristasSnapshot = await getDocs(collection(db, "motoristas"));
+    
+    for (const motoristaDoc of motoristasSnapshot.docs) {
+      const q = query(
+        collection(db, "motoristas", motoristaDoc.id, "cargas"),
+        where("dt", "==", dt)
+      );
+      const snap = await getDocs(q);
+      if (!snap.empty) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // 3. Verificar se data é passada
+  const verificarDataPassada = (dataStr: string): boolean => {
+    if (!dataStr) return false;
+    
+    // Assumindo formato DD/MM/AAAA
+    const partes = dataStr.split('/');
+    if (partes.length !== 3) return false;
+    
+    const data = new Date(`${partes[2]}-${partes[1]}-${partes[0]}`);
+    const hoje = new Date();
+    hoje.setHours(0, 0, 0, 0);
+    
+    return data < hoje;
+  };
+
   const obterOuCriarMotorista = async (dados: CargaData): Promise<string | null> => {
     if (!dados.cpf) return null;
     const qMot = query(collection(db, "motoristas"), where("cpf", "==", dados.cpf));
@@ -154,11 +197,38 @@ const InserirProgramacao: React.FC = () => {
 
   const salvarTudo = async () => {
     if (!cargaDetectada) return;
+    
+    // Limpar mensagem de erro anterior
+    setMensagemErro(null);
     setLoading(true);
+    
     try {
+      // VALIDAÇÃO 1: Verificar data passada
+      if (cargaDetectada.dt && verificarDataPassada(cargaDetectada.dt)) {
+        setMensagemErro(`❌ Não é permitido inserir viagem com data passada. Data informada: ${cargaDetectada.dt}`);
+        setLoading(false);
+        return;
+      }
+
+      // VALIDAÇÃO 2: Verificar DT duplicada
+      if (cargaDetectada.dt && await verificarDTDuplicada(cargaDetectada.dt)) {
+        setMensagemErro(`❌ Já existe uma carga cadastrada com o número de DT: ${cargaDetectada.dt}. Por favor, verifique e tente novamente.`);
+        setLoading(false);
+        return;
+      }
+
       const motoristaId = await obterOuCriarMotorista(cargaDetectada);
       if (!motoristaId) {
-        alert("❌ CPF do motorista é obrigatório.");
+        setMensagemErro("❌ CPF do motorista é obrigatório. Por favor, preencha o CPF corretamente.");
+        setLoading(false);
+        return;
+      }
+
+      // VALIDAÇÃO 3: Verificar viagem ativa do motorista
+      const temViagemAtiva = await verificarViagemAtiva(motoristaId);
+      if (temViagemAtiva) {
+        setMensagemErro(`❌ Motorista ${cargaDetectada.motorista} possui uma viagem em andamento. Não é permitido inserir nova carga enquanto a viagem atual não for finalizada.`);
+        setLoading(false);
         return;
       }
 
@@ -171,9 +241,16 @@ const InserirProgramacao: React.FC = () => {
       });
 
       await realizarAutoCadastros(cargaDetectada);
-      setTextoColado(''); setCargaDetectada(null);
+      setTextoColado(''); 
+      setCargaDetectada(null);
+      setMensagemErro(null);
       alert("✅ Carga salva com sucesso!");
-    } catch (err) { console.error(err); alert("❌ Erro ao salvar carga."); } finally { setLoading(false); }
+    } catch (err) { 
+      console.error(err); 
+      setMensagemErro("❌ Erro ao salvar carga. Verifique sua conexão e tente novamente.");
+    } finally { 
+      setLoading(false); 
+    }
   };
 
   const styles = {
@@ -189,7 +266,9 @@ const InserirProgramacao: React.FC = () => {
     label: { fontSize: '11px', color: '#666', fontWeight: 700, textTransform: 'uppercase' as const, margin: '0 0 4px 0', letterSpacing: '0.5px' },
     value: { fontSize: '15px', color: '#FFF', fontWeight: 700, margin: 0 },
     btnPrimary: { backgroundColor: '#FFD700', color: '#000', padding: '14px 28px', borderRadius: '14px', border: 'none', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px', transition: 'all 0.2s', width: '100%', justifyContent: 'center' },
+    btnPrimaryDisabled: { backgroundColor: '#665500', color: '#333', padding: '14px 28px', borderRadius: '14px', border: 'none', fontWeight: 700, cursor: 'not-allowed', display: 'flex', alignItems: 'center', gap: '10px', width: '100%', justifyContent: 'center' },
     badge: { backgroundColor: '#1A1A1A', color: '#FFD700', padding: '8px 16px', borderRadius: '30px', fontSize: '13px', fontWeight: 700, display: 'flex', alignItems: 'center', border: '1px solid #333' },
+    errorMessage: { backgroundColor: '#DC262620', border: '2px solid #DC2626', borderRadius: '16px', padding: '16px', marginBottom: '20px', color: '#FCA5A5', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '12px' },
   };
 
   return (
@@ -220,11 +299,26 @@ const InserirProgramacao: React.FC = () => {
             <div style={{ background: 'linear-gradient(135deg, #FFD700, #FFA500)', padding: '8px', borderRadius: '14px' }}><PlusCircle size={20} color="#000" /></div>
             <h2 style={{ fontSize: '20px', fontWeight: 700, margin: 0, color: '#FFF' }}>Lançar Nova Carga</h2>
           </div>
+          
+          {/* EXIBIR MENSAGEM DE ERRO */}
+          {mensagemErro && (
+            <div style={styles.errorMessage}>
+              <div style={{ fontSize: '24px' }}>⚠️</div>
+              <div style={{ flex: 1 }}>{mensagemErro}</div>
+              <button 
+                onClick={() => setMensagemErro(null)} 
+                style={{ background: 'transparent', border: 'none', color: '#FCA5A5', cursor: 'pointer', fontSize: '18px' }}
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
           <textarea
             style={styles.textarea}
             placeholder="Cole aqui o texto da carga..."
             value={textoColado}
-            onChange={(e) => { setTextoColado(e.target.value); parsearCarga(e.target.value); }}
+            onChange={(e) => { setTextoColado(e.target.value); parsearCarga(e.target.value); setMensagemErro(null); }}
           />
 
           {cargaDetectada && (
@@ -271,7 +365,11 @@ const InserirProgramacao: React.FC = () => {
                 </div>
               </div>
 
-              <button style={styles.btnPrimary} onClick={salvarTudo} disabled={loading}>
+              <button 
+                style={loading ? styles.btnPrimaryDisabled : styles.btnPrimary} 
+                onClick={salvarTudo} 
+                disabled={loading}
+              >
                 {loading ? <RefreshCw size={20} className="spin" /> : <><CheckCircle2 size={20} /> Confirmar e Salvar Carga</>}
               </button>
             </div>

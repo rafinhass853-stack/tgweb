@@ -157,7 +157,6 @@ async function capturarLocalizacoes() {
     // 5. EXTRAIR DADOS
     console.log('📊 Extraindo dados dos veículos...');
     
-    // Mapeamento manual dos índices baseado nos cabeçalhos
     const veiculos = await page.evaluate(() => {
       const resultados = [];
       
@@ -169,56 +168,24 @@ async function capturarLocalizacoes() {
       
       const rows = tbody.querySelectorAll('tr');
       
-      // ÍNDICES CONHECIDOS (baseado no cabeçalho):
-      // 0: Ação
-      // 1: Veículo
-      // 2: Placa
-      // 3: Frota
-      // 4: Data Posição
-      // 5: Latitude
-      // 6: Longitude
-      // 7: Curso
-      // 8: Vel.
-      // 9: Vel.Máx
-      // 10: Alarme
-      // 11: Ignição  <-- ÍNDICE DA IGNIÇÃO (chave verde/vermelha)
-      // 12: Login
-      // 13: Motorista
-      // 14: Macro
-      // 15: Data Macro
-      // 16: Cliente
-      // 17: Logradouro
-      // 18: Local
-      // 19: PA Sat.
-      // 20: Data PA. Sat
-      // 21: Obs
-      // 22: Obs2
-      // 23: Obs3
-      
       for (const row of rows) {
         const cells = row.querySelectorAll('td');
         
         if (cells.length >= 18) {
-          // Placa - índice 2
           const placa = cells[2]?.innerText?.trim() || '';
           
-          // Latitude - índice 5
           let latitudeRaw = cells[5]?.innerText?.trim() || '';
           let latitude = latitudeRaw ? parseFloat(latitudeRaw.replace(',', '.')) : null;
           
-          // Longitude - índice 6
           let longitudeRaw = cells[6]?.innerText?.trim() || '';
           let longitude = longitudeRaw ? parseFloat(longitudeRaw.replace(',', '.')) : null;
           
-          // Velocidade - índice 8
           let velocidade = 0;
           let velocidadeRaw = cells[8]?.innerText?.trim() || '';
           if (velocidadeRaw && !isNaN(parseFloat(velocidadeRaw))) {
             velocidade = parseFloat(velocidadeRaw);
           }
           
-          // IGNIÇÃO - índice 11 (coluna "Ignição")
-          // Esta coluna contém uma imagem/ícone de chave verde ou vermelha
           let ignicao = 'DESCONHECIDO';
           const ignicaoCell = cells[11];
           
@@ -226,13 +193,7 @@ async function capturarLocalizacoes() {
             const ignicaoHtml = ignicaoCell.innerHTML?.trim() || '';
             const ignicaoTexto = ignicaoCell.innerText?.trim() || '';
             
-            // Procura por imagem/ícone de chave
-            // Chave VERDE = Ignição LIGADA
-            // Chave VERMELHA = Ignição DESLIGADA
-            
-            // Verifica no HTML
             if (ignicaoHtml) {
-              // Cor VERDE (ligado)
               if (ignicaoHtml.includes('green') || 
                   ignicaoHtml.includes('success') ||
                   ignicaoHtml.includes('verde') ||
@@ -244,7 +205,6 @@ async function capturarLocalizacoes() {
                   ignicaoHtml.includes('color:#00ff00')) {
                 ignicao = 'LIGADO';
               } 
-              // Cor VERMELHA (desligado)
               else if (ignicaoHtml.includes('red') || 
                        ignicaoHtml.includes('danger') ||
                        ignicaoHtml.includes('vermelho') ||
@@ -257,7 +217,6 @@ async function capturarLocalizacoes() {
                 ignicao = 'DESLIGADO';
               }
               
-              // Verifica se tem imagem (src) com nome que indica cor
               const imgMatch = ignicaoHtml.match(/src="[^"]*(verde|vermelho|green|red)[^"]*"/i);
               if (imgMatch) {
                 if (imgMatch[1].toLowerCase().includes('verde') || imgMatch[1].toLowerCase().includes('green')) {
@@ -268,7 +227,6 @@ async function capturarLocalizacoes() {
               }
             }
             
-            // Se ainda não identificou, tenta pelo texto
             if (ignicao === 'DESCONHECIDO' && ignicaoTexto) {
               const textoLower = ignicaoTexto.toLowerCase();
               if (textoLower.includes('ligado') || textoLower.includes('on') || textoLower.includes('ativo') || textoLower.includes('verde')) {
@@ -279,7 +237,6 @@ async function capturarLocalizacoes() {
             }
           }
           
-          // LOCALIZAÇÃO - Logradouro (índice 17) e Local (índice 18)
           let logradouro = cells[17]?.innerText?.trim() || '';
           let local = cells[18]?.innerText?.trim() || '';
           
@@ -296,7 +253,6 @@ async function capturarLocalizacoes() {
             localizacao = local;
           }
           
-          // Macro (índice 14)
           const macro = cells[14]?.innerText?.trim() || '';
           
           if (placa && placa.length >= 7) {
@@ -325,7 +281,6 @@ async function capturarLocalizacoes() {
       return;
     }
     
-    // Mostrar preview dos dados
     console.log('\n📋 Dados extraídos (primeiros 5):');
     veiculos.slice(0, 5).forEach(v => {
       const statusIcon = v.ignicao === 'LIGADO' ? '🟢' : (v.ignicao === 'DESLIGADO' ? '🔴' : '⚪');
@@ -335,7 +290,6 @@ async function capturarLocalizacoes() {
       if (v.macro) console.log(`        🏷️ Macro: ${v.macro}`);
     });
     
-    // 6. ATUALIZAR FIRESTORE
     console.log('\n📝 Atualizando Firebase...');
     
     let atualizados = 0;
@@ -416,5 +370,27 @@ async function capturarLocalizacoes() {
   }
 }
 
-// Executar
-capturarLocalizacoes();
+// ==================== LOOP COM INTERVALO DO .ENV ====================
+const INTERVALO_MINUTOS = parseInt(process.env.CRON_INTERVAL || '20');
+const INTERVALO_MS = INTERVALO_MINUTOS * 60 * 1000;
+
+async function executarLoop() {
+  console.log(`\n${'='.repeat(60)}`);
+  console.log(`🕒 ROBÔ SIGHRA INICIADO`);
+  console.log(`📆 Intervalo configurado: ${INTERVALO_MINUTOS} minutos`);
+  console.log(`🤖 Modo headless: ${process.env.HEADLESS === 'true' ? 'SIM' : 'NÃO'}`);
+  console.log(`⏰ Próxima execução a cada ${INTERVALO_MINUTOS} minutos`);
+  console.log(`${'='.repeat(60)}\n`);
+  
+  // Executa primeira vez imediatamente
+  await capturarLocalizacoes();
+  
+  // Agenda as próximas execuções
+  setInterval(async () => {
+    console.log(`\n🔄 Executando nova coleta (intervalo de ${INTERVALO_MINUTOS} min)...`);
+    await capturarLocalizacoes();
+  }, INTERVALO_MS);
+}
+
+// Iniciar o loop
+executarLoop().catch(console.error);

@@ -1,4 +1,3 @@
-// WhatsAppQRModal.jsx
 import React, { useState, useEffect } from 'react';
 import QRCode from 'qrcode.react';
 import io from 'socket.io-client';
