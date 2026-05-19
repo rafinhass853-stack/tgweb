@@ -9,6 +9,7 @@ import InserirProgramacao from './InserirProgramacao';
 // import VisualizarProgramacoes from './VisualizarProgramacoes'; // COMENTADO - DESATIVADO
 import LeadTime from './LeadTime';
 import Documentacao from './Documentacao';
+import EscalaTodosMotoristas from './EscalaTodosMotoristas';
 
 // Definição de tipos
 type MenuItemType = {
@@ -33,7 +34,8 @@ const Menu = () => {
     'monitoramento' | 
     'frota-motoristas' | 
     'frota-veiculos' |
-    'cargas-inserir' 
+    'cargas-inserir' |
+    'frota-escala-geral'
     // 'cargas-visualizar' // REMOVIDO
   >('frota-motoristas'); // ALTERADO: agora começa em frota-motoristas
 
@@ -73,7 +75,8 @@ const Menu = () => {
       isSection: true,
       children: [
         { id: 'frota-motoristas', label: 'Motoristas', icon: '👤', color: '#FFD700' },
-        { id: 'frota-veiculos', label: 'Veículos', icon: '🚙', color: '#FFD700' }
+        { id: 'frota-veiculos', label: 'Veículos', icon: '🚙', color: '#FFD700' },
+        { id: 'frota-escala-geral', label: 'Escala Geral', icon: '📅', color: '#FFD700' }
       ]
     },
     {
@@ -105,6 +108,7 @@ const Menu = () => {
     // if (activeTab === 'monitoramento') return 'Monitoramento'; // REMOVIDO
     if (activeTab === 'frota-motoristas') return 'Motoristas Cadastrados';
     if (activeTab === 'frota-veiculos') return 'Veículos Cadastrados';
+    if (activeTab === 'frota-escala-geral') return 'Escala Geral de Motoristas';
     if (activeTab === 'cargas-inserir') return 'Inserir Programação';
     // if (activeTab === 'cargas-visualizar') return 'Visualizar Programações'; // REMOVIDO
     return 'Dashboard';
@@ -114,6 +118,7 @@ const Menu = () => {
     // if (activeTab === 'monitoramento') return 'Acompanhamento em tempo real'; // REMOVIDO
     if (activeTab === 'frota-motoristas') return 'Gerencie os motoristas da sua frota';
     if (activeTab === 'frota-veiculos') return 'Gerencie os veículos da sua frota';
+    if (activeTab === 'frota-escala-geral') return 'Controle unificado de presenças e folgas';
     if (activeTab === 'cargas-inserir') return 'Cadastre novas cargas no sistema';
     // if (activeTab === 'cargas-visualizar') return 'Acompanhe e gerencie todas as cargas'; // REMOVIDO
     return 'Gerencie sua frota de forma eficiente';
@@ -280,6 +285,7 @@ const Menu = () => {
                 <ListaMotoristas onSelectMotorista={handleSelectMotorista} />
             )}
             {activeTab === 'frota-veiculos' && <ListaVeiculos />}
+            {activeTab === 'frota-escala-geral' && <EscalaTodosMotoristas />}
             {activeTab === 'cargas-inserir' && <InserirProgramacao />}
             {/* {activeTab === 'cargas-visualizar' && <VisualizarProgramacoes />} COMENTADO - DESATIVADO */}
           </div>
