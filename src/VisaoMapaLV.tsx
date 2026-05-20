@@ -1,15 +1,109 @@
-// VisaoMapaLV.tsx
-import React, { useEffect, useState, useMemo, useRef } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Circle, useMap } from 'react-leaflet';
+// VisaoMapaLV.tsx - VERSÃO COM LEGENDAS COLORIDAS E MOTORISTA VISÍVEL
+import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
+import { MapContainer, TileLayer, Marker, Popup, Tooltip, useMap, useMapEvents, Circle, Polygon } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { X, RefreshCw, ArrowLeft, Truck, MapPin, Navigation, ZoomIn, ZoomOut, Crosshair, Filter, Eye } from 'lucide-react';
+import {
+  Truck, MapPin, Filter, X, RefreshCw, Calendar, Clock, Package, MapPinned, Weight,
+  AlertCircle, FileText, Maximize2, Minimize2, ChevronDown, ChevronUp, Users, Briefcase,
+  ArrowLeft, Eye, Building2, Plus, Save, Trash2, Edit, City, Target, List, UserPlus,
+  Volume2, Bell, History, Zap, Radio, Fuel, Scale, AlertTriangle, Home, MapPinCheck,
+  Layers, ZoomIn, ZoomOut, Navigation, Crosshair, Menu, Settings, Star, Award, FilterX
+} from 'lucide-react';
 
 // ============================================
-// CONFIGURAÇÕES DO MAPA
+// INTERFACES EXPANDIDAS
 // ============================================
 
-// Corrigir ícones do Leaflet
+type TipoLocal = 'cliente_homologado' | 'cliente_potencial' | 'ponto_apoio' | 'abastecimento' | 'filial' | 'matriz' | 'balanca' | 'pedagio';
+
+interface Cerca {
+  id: string;
+  tipo: 'circulo' | 'poligono';
+  raio?: number;
+  pontos?: Array<{ lat: number; lng: number }>;
+}
+
+interface LocalComGeofence {
+  id: string;
+  nome: string;
+  tipo: TipoLocal;
+  cidade: string;
+  uf: string;
+  observacao: string;
+  coordenadas: { lat: number; lng: number };
+  cerca: Cerca;
+  createdAt: string;
+  alertaSom?: boolean;
+  alertaVisual?: boolean;
+}
+
+interface RegistroPermanencia {
+  id: string;
+  localId: string;
+  motoristaId: string;
+  dataEntrada: string;
+  dataSaida?: string;
+  tempoTotalMinutos?: number;
+  ativo: boolean;
+}
+
+interface HistoricoVisita {
+  id: string;
+  localId: string;
+  motoristaId: string;
+  dataEntrada: string;
+  dataSaida: string;
+  tempoTotalMinutos: number;
+}
+
+interface VeiculoComLocalizacao {
+  id: string;
+  placa: string;
+  tipo: string;
+  capacidade?: number;
+  ultimaLocalizacao?: string;
+  ultimoEndereco?: string;
+  velocidade?: number;
+  ultimaAtualizacaoRastreador?: any;
+  statusRastreador?: 'online' | 'offline' | 'parado';
+  ultimaMacro?: string;
+  coordenadas?: { lat: number; lng: number };
+  motoristaProgramado?: string;
+  motoristaNome?: string;
+  cargaAtual?: {
+    id: string;
+    dt?: string;
+    cliente?: string;
+    coletaLocal: string;
+    coletaCidade: string;
+    coletaEndereco?: string;
+    entregaLocal: string;
+    entregaCidade: string;
+    entregaEndereco?: string;
+    coletaData: string;
+    coletaHora?: string;
+    entregaData: string;
+    entregaHora?: string;
+    peso: string;
+    produto?: string;
+    notaFiscal?: string;
+    motorista?: string;
+  };
+}
+
+interface VisaoMapaProps {
+  veiculos: VeiculoComLocalizacao[];
+  cargasPorVeiculo?: Record<string, any>;
+  onRefresh?: () => void;
+  onBack?: () => void;
+  loading?: boolean;
+}
+
+// ============================================
+// CONFIGURAÇÕES E CONSTANTES
+// ============================================
+
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
@@ -17,242 +111,134 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
 });
 
-// Interface do Veículo (compatível com ListaVeiculos)
-interface Veiculo {
-  id: string;
-  placa: string;
-  tipo: string;
-  capacidade?: number;
-  createdAt?: any;
-  ultimaLocalizacao?: string;
-  ultimoEndereco?: string;
-  velocidade?: number;
-  ultimaAtualizacaoRastreador?: any;
-  statusRastreador?: 'online' | 'offline' | 'parado';
-  ultimaMacro?: string;
-  coordenadas?: {
-    lat: number;
-    lng: number;
-  };
-}
-
-// Interface da Carga (para exibir programação)
-interface CargaProgramada {
-  id: string;
-  dt: string;
-  coletaCidade: string;
-  coletaLocal: string;
-  coletaData: string;
-  entregaCidade: string;
-  entregaLocal: string;
-  entregaData: string;
-  status: string;
-  motorista: string;
-  peso: string;
-  placa: string;
-  carreta?: string;
-  veiculo?: string;
-}
-
-interface VisaoMapaProps {
-  veiculos: Veiculo[];
-  cargasPorVeiculo: Record<string, CargaProgramada | null>;
-  onRefresh?: () => void;
-  onBack?: () => void;
-  loading?: boolean;
-}
-
-// Configuração de cores por status do rastreador
-const STATUS_CONFIG: Record<string, { cor: string; label: string; legenda: string }> = {
-  'online': { cor: '#22C55E', label: 'Online', legenda: '🟢 Veículo em movimento com rastreador ativo' },
-  'offline': { cor: '#EF4444', label: 'Offline', legenda: '🔴 Veículo sem comunicação com rastreador' },
-  'parado': { cor: '#FF9500', label: 'Parado', legenda: '🟠 Veículo estacionado/parado com rastreador ativo' },
+// Status do RASTREADOR (cores iguais ao outro código)
+const STATUS_RASTREADOR_CONFIG: Record<string, { cor: string; corBg: string; label: string; legenda: string }> = {
+  'online': { cor: '#22C55E', corBg: '#22C55E20', label: 'Online', legenda: '🟢 Veículo em movimento com rastreador ativo' },
+  'offline': { cor: '#EF4444', corBg: '#EF444420', label: 'Offline', legenda: '🔴 Veículo sem comunicação com rastreador' },
+  'parado': { cor: '#FF9500', corBg: '#FF950020', label: 'Parado', legenda: '🟠 Veículo estacionado/parado com rastreador ativo' },
 };
 
-// Configuração por tipo de veículo
-const TIPO_CONFIG: Record<string, { label: string; icone: string }> = {
-  'toco': { label: 'Toco', icone: '🚛' },
-  'trucado': { label: 'Trucado', icone: '🚛' },
-  'truck': { label: 'Truck', icone: '🚚' },
+// Status da CARGA (cores iguais ao outro código)
+const STATUS_CARGA_CONFIG: Record<string, { cor: string; corBg: string; label: string; icon: string; legenda: string }> = {
+  'programada': { cor: '#FFD700', corBg: '#FFD70020', label: 'Programada', icon: '⏳', legenda: 'Carga programada - Aguardando início' },
+  'aguardando_carregamento': { cor: '#FF9500', corBg: '#FF950020', label: 'Aguardando Carregamento', icon: '📦', legenda: 'Aguardando carregamento da carga' },
+  'seguindo_para_entrega': { cor: '#22C55E', corBg: '#22C55E20', label: 'Em Rota', icon: '🚛', legenda: 'Veículo em rota de entrega' },
+  'chegou_entrega': { cor: '#3B82F6', corBg: '#3B82F620', label: 'Chegou na Entrega', icon: '📍', legenda: 'Veículo chegou ao destino' },
+  'sem_carga': { cor: '#6B7280', corBg: '#6B728020', label: 'Sem Carga', icon: '⭕', legenda: 'Sem carga programada' },
+};
+
+const TIPOS_LOCAL_CONFIG: Record<TipoLocal, { cor: string; icon: string; label: string; descricao: string }> = {
+  'cliente_homologado': { cor: '#3B82F6', icon: '✅', label: 'Cliente Homologado', descricao: 'Cliente verificado e aprovado' },
+  'cliente_potencial': { cor: '#8B5CF6', icon: '🎯', label: 'Cliente Potencial', descricao: 'Possível novo cliente' },
+  'ponto_apoio': { cor: '#EC4899', icon: '🏪', label: 'Ponto de Apoio', descricao: 'Local de suporte operacional' },
+  'abastecimento': { cor: '#F59E0B', icon: '⛽', label: 'Abastecimento', descricao: 'Posto de combustível' },
+  'filial': { cor: '#10B981', icon: '🏢', label: 'Filial', descricao: 'Filial da empresa' },
+  'matriz': { cor: '#DC2626', icon: '🏛️', label: 'Matriz', descricao: 'Sede principal' },
+  'balanca': { cor: '#6366F1', icon: '⚖️', label: 'Balança', descricao: 'Ponto de pesagem' },
+  'pedagio': { cor: '#14B8A6', icon: '🛣️', label: 'Pedágio', descricao: 'Praça de pedágio' },
+};
+
+const TIPO_VEICULO_CONFIG: Record<string, { label: string; icone: string }> = {
+  'toco': { label: 'Toco (2 eixos)', icone: '🚛' },
+  'trucado': { label: 'Trucado (3 eixos)', icone: '🚛' },
+  'truck': { label: 'Truck (Cavalo)', icone: '🚚' },
 };
 
 // ============================================
 // FUNÇÕES UTILITÁRIAS
 // ============================================
 
-const getStatusInfo = (status: string) => {
-  switch (status) {
-    case 'programada':
-      return { label: 'PROGRAMADA', color: '#FFD700', bg: '#FFD70020', icon: '⏳', legenda: 'Carga programada - Aguardando início' };
-    case 'aguardando_carregamento':
-      return { label: 'AGUARDANDO CARREGAMENTO', color: '#FF9500', bg: '#FF950020', icon: '📦', legenda: 'Aguardando carregamento da carga' };
-    case 'seguindo_para_entrega':
-      return { label: 'EM ROTA', color: '#22C55E', bg: '#22C55E20', icon: '🚛', legenda: 'Veículo em rota de entrega' };
-    case 'chegou_entrega':
-      return { label: 'CHEGOU NA ENTREGA', color: '#3B82F6', bg: '#3B82F620', icon: '📍', legenda: 'Veículo chegou ao destino' };
-    default:
-      return { label: status?.toUpperCase() || 'SEM CARGA', color: '#6B7280', bg: '#6B728020', icon: '⭕', legenda: 'Sem carga programada' };
-  }
+const calcularDistancia = (lat1: number, lng1: number, lat2: number, lng2: number): number => {
+  const R = 6371000;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
 };
 
-const getTipoNome = (tipo: string) => {
-  switch (tipo) {
-    case 'toco': return 'Toco (2 eixos)';
-    case 'trucado': return 'Trucado (3 eixos)';
-    case 'truck': return 'Truck (Cavalo)';
-    default: return tipo;
+const pontoEmPoligono = (lat: number, lng: number, pontos: Array<{ lat: number; lng: number }>): boolean => {
+  let dentro = false;
+  for (let i = 0, j = pontos.length - 1; i < pontos.length; j = i++) {
+    const xi = pontos[i].lng, yi = pontos[i].lat;
+    const xj = pontos[j].lng, yj = pontos[j].lat;
+    const intersect = ((yi > lng) !== (yj > lng)) && (lng < (xj - xi) * (lng - yi) / (yj - yi) + xi);
+    if (intersect) dentro = !dentro;
   }
+  return dentro;
 };
 
-// ============================================
-// ÍCONE PERSONALIZADO PARA VEÍCULOS COM STATUS
-// ============================================
-
-const createVehicleIcon = (statusRastreador: string, placa: string, tipo: string, carga: CargaProgramada | null) => {
-  const config = STATUS_CONFIG[statusRastreador] || STATUS_CONFIG['offline'];
-  const tipoConfig = TIPO_CONFIG[tipo] || { icone: '🚛', label: tipo };
-  const corPrincipal = config.cor;
-  const statusCarga = carga?.status || 'sem_carga';
-  const cargaInfo = getStatusInfo(statusCarga);
+const veiculoEmGeofence = (veiculo: VeiculoComLocalizacao, local: LocalComGeofence): boolean => {
+  if (!veiculo.coordenadas) return false;
   
-  // Adicionar indicador de carga no ícone
-  const cargaIndicator = carga ? cargaInfo.icon : '⭕';
-  const motorista = carga?.motorista || 'Sem motorista';
-  const motoristaAbreviado = motorista.length > 15 ? motorista.substring(0, 12) + '...' : motorista;
-
-  const canvas = document.createElement('canvas');
-  canvas.width = 60;
-  canvas.height = 60;
-  const ctx = canvas.getContext('2d');
-
-  if (ctx) {
-    // Círculo externo com gradiente
-    const gradient = ctx.createLinearGradient(0, 0, 60, 60);
-    gradient.addColorStop(0, `${corPrincipal}40`);
-    gradient.addColorStop(1, `${corPrincipal}10`);
-    ctx.beginPath();
-    ctx.arc(30, 30, 26, 0, 2 * Math.PI);
-    ctx.fillStyle = gradient;
-    ctx.fill();
-    ctx.strokeStyle = corPrincipal;
-    ctx.lineWidth = 3;
-    ctx.stroke();
-
-    // Ícone do veículo
-    ctx.fillStyle = corPrincipal;
-    ctx.font = '28px "Segoe UI Emoji"';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(tipoConfig.icone, 30, 32);
-
-    // Indicador de carga (canto superior direito)
-    ctx.font = '14px "Segoe UI Emoji"';
-    ctx.fillStyle = cargaInfo.color;
-    ctx.fillText(cargaIndicator, 42, 18);
-
-    // Indicador de status (ponto inferior direito)
-    ctx.beginPath();
-    ctx.arc(45, 45, 7, 0, 2 * Math.PI);
-    ctx.fillStyle = corPrincipal;
-    ctx.fill();
-    ctx.fillStyle = '#fff';
-    ctx.font = 'bold 12px "Segoe UI"';
-    ctx.fillText(statusRastreador === 'online' ? '●' : statusRastreador === 'parado' ? '⏸' : '○', 45, 48);
+  if (local.cerca.tipo === 'circulo' && local.cerca.raio) {
+    const distancia = calcularDistancia(
+      veiculo.coordenadas.lat,
+      veiculo.coordenadas.lng,
+      local.coordenadas.lat,
+      local.coordenadas.lng
+    );
+    return distancia <= local.cerca.raio;
+  } else if (local.cerca.tipo === 'poligono' && local.cerca.pontos) {
+    return pontoEmPoligono(veiculo.coordenadas.lat, veiculo.coordenadas.lng, local.cerca.pontos);
   }
+  return false;
+};
 
-  // HTML do marcador com tooltip mostrando status e motorista
-  const htmlContent = `
-    <div style="position: relative; display: inline-block; cursor: pointer;">
-      <img src="${canvas.toDataURL()}" style="width: 60px; height: 60px; display: block;" />
-      <div class="vehicle-tooltip" style="
-        position: absolute;
-        bottom: 100%;
-        left: 50%;
-        transform: translateX(-50%);
-        margin-bottom: 8px;
-        background: rgba(0, 0, 0, 0.95);
-        backdrop-filter: blur(12px);
-        color: white;
-        padding: 6px 12px;
-        border-radius: 8px;
-        font-size: 10px;
-        font-weight: 500;
-        white-space: nowrap;
-        border-left: 3px solid ${corPrincipal};
-        box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-        pointer-events: none;
-        font-family: 'Segoe UI', sans-serif;
-        opacity: 0;
-        transition: opacity 0.2s;
-        z-index: 1000;
-      ">
-        <div style="display: flex; align-items: center; gap: 6px;">
-          <span>${tipoConfig.icone}</span>
-          <strong>${placa}</strong>
-          <span style="color: ${corPrincipal}">●</span>
-          <span style="font-size: 9px;">${config.label}</span>
-        </div>
-        <div style="display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 9px;">
-          <span>👨‍✈️</span>
-          <span>${motoristaAbreviado}</span>
-          <span style="color: ${cargaInfo.color}">${cargaIndicator}</span>
-          <span style="font-size: 9px;">${cargaInfo.label}</span>
-        </div>
-      </div>
-      <div style="
-        position: absolute;
-        top: -25px;
-        left: 50%;
-        transform: translateX(-50%);
-        background: rgba(0, 0, 0, 0.85);
-        backdrop-filter: blur(8px);
-        color: white;
-        padding: 3px 8px;
-        border-radius: 16px;
-        font-size: 9px;
-        font-weight: 600;
-        white-space: nowrap;
-        border: 1px solid ${corPrincipal};
-        box-shadow: 0 2px 6px rgba(0,0,0,0.3);
-        pointer-events: none;
-        font-family: 'Segoe UI', sans-serif;
-      ">
-        ${placa}
-      </div>
-    </div>
-  `;
+const reproduzirSomAlerta = (tipo: 'entrada' | 'saida' = 'entrada') => {
+  try {
+    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
+    
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+    
+    if (tipo === 'entrada') {
+      oscillator.frequency.value = 800;
+      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.5);
+    } else {
+      oscillator.frequency.value = 400;
+      gainNode.gain.setValueAtTime(0.2, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.3);
+    }
+  } catch (e) {
+    console.error('Erro ao reproduzir som:', e);
+  }
+};
 
-  return L.divIcon({
-    html: htmlContent,
-    className: 'custom-vehicle-icon',
-    iconSize: [60, 80],
-    iconAnchor: [30, 60],
-    popupAnchor: [0, -60]
-  });
+const formatarTempo = (minutos: number): string => {
+  const horas = Math.floor(minutos / 60);
+  const mins = minutos % 60;
+  if (horas > 0) {
+    return `${horas}h ${mins}m`;
+  }
+  return `${mins}m`;
+};
+
+const getStatusCargaInfo = (status?: string) => {
+  return STATUS_CARGA_CONFIG[status || 'sem_carga'] || STATUS_CARGA_CONFIG['sem_carga'];
+};
+
+const getTipoVeiculoInfo = (tipo: string) => {
+  return TIPO_VEICULO_CONFIG[tipo] || { label: tipo, icone: '🚛' };
 };
 
 // ============================================
 // COMPONENTES DE NAVEGAÇÃO
 // ============================================
 
-// Controlador do mapa para centralizar
-function MapController({ center, zoom }: { center?: [number, number]; zoom?: number }) {
-  const map = useMap();
-
-  useEffect(() => {
-    if (center && center[0] !== 0 && center[1] !== 0) {
-      map.setView(center, zoom || 12);
-    }
-  }, [center, zoom, map]);
-
-  return null;
-}
-
-// Botões de zoom
 const ZoomControls: React.FC<{ map?: L.Map }> = ({ map }) => {
   const handleZoomIn = () => map?.zoomIn();
   const handleZoomOut = () => map?.zoomOut();
-
+  
   return (
     <div style={{
       position: 'absolute',
@@ -276,7 +262,8 @@ const ZoomControls: React.FC<{ map?: L.Map }> = ({ map }) => {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          transition: 'all 0.2s'
+          transition: 'all 0.2s',
+          backdropFilter: 'blur(10px)'
         }}
         onMouseEnter={(e) => {
           e.currentTarget.style.backgroundColor = '#3B82F6';
@@ -302,7 +289,8 @@ const ZoomControls: React.FC<{ map?: L.Map }> = ({ map }) => {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          transition: 'all 0.2s'
+          transition: 'all 0.2s',
+          backdropFilter: 'blur(10px)'
         }}
         onMouseEnter={(e) => {
           e.currentTarget.style.backgroundColor = '#3B82F6';
@@ -319,7 +307,6 @@ const ZoomControls: React.FC<{ map?: L.Map }> = ({ map }) => {
   );
 };
 
-// Botão de localização
 const LocateButton: React.FC<{ onLocate: () => void }> = ({ onLocate }) => {
   return (
     <button
@@ -339,7 +326,8 @@ const LocateButton: React.FC<{ onLocate: () => void }> = ({ onLocate }) => {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        transition: 'all 0.2s'
+        transition: 'all 0.2s',
+        backdropFilter: 'blur(10px)'
       }}
       onMouseEnter={(e) => {
         e.currentTarget.style.backgroundColor = '#22C55E';
@@ -355,15 +343,14 @@ const LocateButton: React.FC<{ onLocate: () => void }> = ({ onLocate }) => {
   );
 };
 
-// Painel de estatísticas
 const StatsWidget: React.FC<{ stats: any; onExpand?: () => void }> = ({ stats, onExpand }) => {
   const [expanded, setExpanded] = useState(false);
-
+  
   const handleToggle = () => {
     setExpanded(!expanded);
     if (!expanded && onExpand) onExpand();
   };
-
+  
   return (
     <div style={{
       position: 'absolute',
@@ -405,9 +392,9 @@ const StatsWidget: React.FC<{ stats: any; onExpand?: () => void }> = ({ stats, o
             {stats.comLocalizacao}/{stats.total}
           </div>
         </div>
-        <div style={{ fontSize: 10, color: '#AAA' }}>{expanded ? '▲' : '▼'}</div>
+        {expanded ? <ChevronUp size={16} color="#AAA" /> : <ChevronDown size={16} color="#AAA" />}
       </div>
-
+      
       {expanded && (
         <div style={{ padding: '12px 16px', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
@@ -421,8 +408,8 @@ const StatsWidget: React.FC<{ stats: any; onExpand?: () => void }> = ({ stats, o
             </div>
           </div>
           <div>
-            <div style={{ fontSize: 10, color: '#666' }}>Parados</div>
-            <div style={{ fontSize: 18, fontWeight: 600, color: '#FF9500' }}>{stats.parado}</div>
+            <div style={{ fontSize: 10, color: '#666' }}>Filtrados</div>
+            <div style={{ fontSize: 18, fontWeight: 600, color: '#FFD700' }}>{stats.filtrados}</div>
           </div>
         </div>
       )}
@@ -430,130 +417,150 @@ const StatsWidget: React.FC<{ stats: any; onExpand?: () => void }> = ({ stats, o
   );
 };
 
-// Legenda detalhada com informações de status
-const LegendaPanel = () => {
-  const [showLegenda, setShowLegenda] = useState(false);
-
+const QuickNavMenu: React.FC<{
+  locais: LocalComGeofence[];
+  onNavigateTo: (lat: number, lng: number) => void;
+}> = ({ locais, onNavigateTo }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  
+  const filteredLocais = useMemo(() => {
+    if (!searchTerm) return locais.slice(0, 5);
+    return locais.filter(l => 
+      l.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      l.cidade.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+  }, [locais, searchTerm]);
+  
   return (
-    <>
+    <div style={{
+      position: 'absolute',
+      top: 90,
+      right: 20,
+      zIndex: 1000
+    }}>
       <button
-        onClick={() => setShowLegenda(!showLegenda)}
+        onClick={() => setIsOpen(!isOpen)}
         style={{
-          position: 'absolute',
-          bottom: 20,
-          left: 80,
-          zIndex: 1000,
           width: 44,
           height: 44,
           borderRadius: 12,
-          backgroundColor: showLegenda ? '#8B5CF6' : '#1A1A1A',
-          border: '1px solid #333',
+          backgroundColor: isOpen ? '#3B82F6' : '#1A1A1A',
+          border: isOpen ? '1px solid #3B82F6' : '1px solid #333',
           color: '#FFF',
           cursor: 'pointer',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          transition: 'all 0.2s'
+          transition: 'all 0.2s',
+          backdropFilter: 'blur(10px)'
         }}
       >
-        <Eye size={20} />
+        <Navigation size={20} />
       </button>
-
-      {showLegenda && (
+      
+      {isOpen && (
         <div style={{
           position: 'absolute',
-          bottom: 80,
-          left: 20,
-          zIndex: 1000,
-          backgroundColor: 'rgba(0,0,0,0.92)',
-          backdropFilter: 'blur(12px)',
+          top: 52,
+          right: 0,
+          width: 280,
+          backgroundColor: '#0A0A0A',
           borderRadius: 12,
-          border: '1px solid rgba(255,255,255,0.15)',
-          padding: '14px 18px',
-          minWidth: 260,
-          maxWidth: 320
+          border: '1px solid #333',
+          overflow: 'hidden',
+          boxShadow: '0 8px 24px rgba(0,0,0,0.5)'
         }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: '#FFF', marginBottom: 12, borderBottom: '1px solid #333', paddingBottom: 6 }}>
-            📖 Legenda do Mapa
+          <div style={{ padding: 12 }}>
+            <input
+              type="text"
+              placeholder="Buscar local..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '10px',
+                borderRadius: 8,
+                border: '1px solid #333',
+                backgroundColor: '#1A1A1A',
+                color: '#FFF',
+                fontSize: 12
+              }}
+              autoFocus
+            />
           </div>
           
-          <div style={{ marginBottom: 12 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: '#FFD700', marginBottom: 6 }}>🚛 Status do Rastreador:</div>
-            {Object.entries(STATUS_CONFIG).map(([key, config]) => (
-              <div key={key} style={{ marginBottom: 6 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
-                  <div style={{ width: 12, height: 12, borderRadius: '50%', backgroundColor: config.cor }} />
-                  <span style={{ fontSize: 11, fontWeight: 500, color: '#FFF' }}>{config.label}</span>
-                </div>
-                <div style={{ fontSize: 9, color: '#999', marginLeft: 20 }}>{config.legenda}</div>
+          <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+            {filteredLocais.map(local => {
+              const config = TIPOS_LOCAL_CONFIG[local.tipo];
+              return (
+                <button
+                  key={local.id}
+                  onClick={() => {
+                    onNavigateTo(local.coordenadas.lat, local.coordenadas.lng);
+                    setIsOpen(false);
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    textAlign: 'left',
+                    background: 'none',
+                    border: 'none',
+                    borderBottom: '1px solid #1A1A1A',
+                    cursor: 'pointer',
+                    transition: 'background 0.2s',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#1A1A1A';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'transparent';
+                  }}
+                >
+                  <span style={{ fontSize: 16 }}>{config.icon}</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: '#FFF' }}>{local.nome}</div>
+                    <div style={{ fontSize: 10, color: '#666' }}>{local.cidade}, {local.uf}</div>
+                  </div>
+                  <Target size={14} color={config.cor} />
+                </button>
+              );
+            })}
+            
+            {filteredLocais.length === 0 && (
+              <div style={{ padding: 20, textAlign: 'center', color: '#666', fontSize: 12 }}>
+                Nenhum local encontrado
               </div>
-            ))}
-          </div>
-          
-          <div style={{ paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.1)', marginBottom: 12 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: '#FFD700', marginBottom: 6 }}>📋 Status da Carga:</div>
-            <div style={{ marginBottom: 6 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
-                <span>🚛</span>
-                <span style={{ fontSize: 11, fontWeight: 500, color: '#22C55E' }}>Em Rota</span>
-              </div>
-              <div style={{ fontSize: 9, color: '#999', marginLeft: 20 }}>Veículo em rota de entrega</div>
-            </div>
-            <div style={{ marginBottom: 6 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
-                <span>📦</span>
-                <span style={{ fontSize: 11, fontWeight: 500, color: '#FF9500' }}>Aguardando Carregamento</span>
-              </div>
-              <div style={{ fontSize: 9, color: '#999', marginLeft: 20 }}>Aguardando início do carregamento</div>
-            </div>
-            <div style={{ marginBottom: 6 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
-                <span>⏳</span>
-                <span style={{ fontSize: 11, fontWeight: 500, color: '#FFD700' }}>Programada</span>
-              </div>
-              <div style={{ fontSize: 9, color: '#999', marginLeft: 20 }}>Carga programada - Aguardando início</div>
-            </div>
-            <div style={{ marginBottom: 6 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
-                <span>📍</span>
-                <span style={{ fontSize: 11, fontWeight: 500, color: '#3B82F6' }}>Chegou na Entrega</span>
-              </div>
-              <div style={{ fontSize: 9, color: '#999', marginLeft: 20 }}>Veículo chegou ao destino final</div>
-            </div>
-          </div>
-          
-          <div style={{ paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.1)' }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: '#FFD700', marginBottom: 6 }}>👨‍✈️ Informações no Marcador:</div>
-            <div style={{ fontSize: 10, color: '#AAA', lineHeight: 1.4 }}>
-              • <strong>Tooltip ao passar mouse</strong>: Mostra placa, status do rastreador, motorista e status da carga
-              <br />• <strong>Popup ao clicar</strong>: Mostra todas as informações detalhadas do veículo e carga
-            </div>
+            )}
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 };
 
-// Painel de filtros
+// Painel de filtros de VEÍCULOS
 const FilterPanel: React.FC<{
   filtros: any;
   onFilterChange: (filtros: any) => void;
   onClose: () => void;
-  veiculos: Veiculo[];
+  veiculos: VeiculoComLocalizacao[];
 }> = ({ filtros, onFilterChange, onClose, veiculos }) => {
   const [localFiltros, setLocalFiltros] = useState(filtros);
-
+  
   const tiposUnicos = useMemo(() => {
     const tipos = veiculos.map(v => v.tipo).filter((t, i, arr) => t && arr.indexOf(t) === i);
     return tipos;
   }, [veiculos]);
-
+  
   const handleApply = () => {
     onFilterChange(localFiltros);
     onClose();
   };
-
+  
   const handleReset = () => {
     const resetFiltros = {
       statusRastreador: 'todos',
@@ -565,13 +572,13 @@ const FilterPanel: React.FC<{
     onFilterChange(resetFiltros);
     onClose();
   };
-
+  
   return (
     <div style={{
       position: 'absolute',
       top: 90,
       right: 20,
-      width: 300,
+      width: 320,
       backgroundColor: '#0A0A0A',
       borderRadius: 16,
       border: '1px solid #333',
@@ -586,13 +593,13 @@ const FilterPanel: React.FC<{
         alignItems: 'center'
       }}>
         <h3 style={{ margin: 0, color: '#FFF', fontSize: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Filter size={18} /> Filtros
+          <Filter size={18} /> Filtros Veículos
         </h3>
         <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#888', cursor: 'pointer' }}>
           <X size={20} />
         </button>
       </div>
-
+      
       <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
         <div>
           <label style={{ display: 'block', marginBottom: 6, color: '#AAA', fontSize: 12 }}>Status Rastreador</label>
@@ -609,13 +616,13 @@ const FilterPanel: React.FC<{
               fontSize: 12
             }}
           >
-            <option value="todos">Todos</option>
-            {Object.entries(STATUS_CONFIG).map(([key, val]) => (
+            <option value="todos">Todos os status</option>
+            {Object.entries(STATUS_RASTREADOR_CONFIG).map(([key, val]) => (
               <option key={key} value={key}>{val.label}</option>
             ))}
           </select>
         </div>
-
+        
         <div>
           <label style={{ display: 'block', marginBottom: 6, color: '#AAA', fontSize: 12 }}>Tipo de Veículo</label>
           <select
@@ -631,13 +638,13 @@ const FilterPanel: React.FC<{
               fontSize: 12
             }}
           >
-            <option value="todos">Todos</option>
+            <option value="todos">Todos os tipos</option>
             {tiposUnicos.map(tipo => (
-              <option key={tipo} value={tipo}>{getTipoNome(tipo)}</option>
+              <option key={tipo} value={tipo}>{TIPO_VEICULO_CONFIG[tipo]?.label || tipo}</option>
             ))}
           </select>
         </div>
-
+        
         <div>
           <label style={{ display: 'block', marginBottom: 6, color: '#AAA', fontSize: 12 }}>Placa</label>
           <input
@@ -656,7 +663,7 @@ const FilterPanel: React.FC<{
             }}
           />
         </div>
-
+        
         <div>
           <label style={{
             display: 'flex',
@@ -679,7 +686,7 @@ const FilterPanel: React.FC<{
             </span>
           </label>
         </div>
-
+        
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 8 }}>
           <button
             onClick={handleReset}
@@ -709,7 +716,222 @@ const FilterPanel: React.FC<{
               fontWeight: 600
             }}
           >
-            Aplicar
+            Aplicar Filtros
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Painel de filtros de LOCAIS
+const FilterLocaisPanel: React.FC<{
+  filtros: any;
+  onFilterChange: (filtros: any) => void;
+  onClose: () => void;
+  totalLocais: number;
+  filteredCount: number;
+  locais: LocalComGeofence[];
+  veiculos: VeiculoComLocalizacao[];
+}> = ({ filtros, onFilterChange, onClose, totalLocais, filteredCount, locais, veiculos }) => {
+  const [localFiltros, setLocalFiltros] = useState(filtros);
+  
+  const handleToggleTipo = (tipo: TipoLocal) => {
+    const tiposAtuais = localFiltros.tipos;
+    const novosTipos = tiposAtuais.includes(tipo)
+      ? tiposAtuais.filter(t => t !== tipo)
+      : [...tiposAtuais, tipo];
+    setLocalFiltros({ ...localFiltros, tipos: novosTipos });
+  };
+  
+  const handleSelectAll = () => {
+    if (localFiltros.tipos.length === Object.keys(TIPOS_LOCAL_CONFIG).length) {
+      setLocalFiltros({ ...localFiltros, tipos: [] });
+    } else {
+      setLocalFiltros({ 
+        ...localFiltros, 
+        tipos: Object.keys(TIPOS_LOCAL_CONFIG) as TipoLocal[]
+      });
+    }
+  };
+  
+  const handleApply = () => {
+    onFilterChange(localFiltros);
+    onClose();
+  };
+  
+  const handleReset = () => {
+    const resetFiltros = {
+      tipos: [],
+      busca: '',
+      apenasComVeiculos: false
+    };
+    setLocalFiltros(resetFiltros);
+    onFilterChange(resetFiltros);
+    onClose();
+  };
+  
+  return (
+    <div style={{
+      position: 'absolute',
+      top: 90,
+      right: 20,
+      width: 380,
+      backgroundColor: '#0A0A0A',
+      borderRadius: 16,
+      border: '1px solid #333',
+      zIndex: 1000,
+      maxHeight: 'calc(100vh - 120px)',
+      overflowY: 'auto',
+      boxShadow: '0 8px 24px rgba(0,0,0,0.5)'
+    }}>
+      <div style={{
+        padding: '16px 20px',
+        borderBottom: '1px solid #222',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        background: 'linear-gradient(135deg, #EC489920, transparent)'
+      }}>
+        <h3 style={{ margin: 0, color: '#FFF', fontSize: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <MapPin size={18} /> Filtros de Locais
+        </h3>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#888', cursor: 'pointer' }}>
+          <X size={20} />
+        </button>
+      </div>
+      
+      <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div>
+          <label style={{ display: 'block', marginBottom: 6, color: '#AAA', fontSize: 12 }}>Buscar por nome</label>
+          <input
+            type="text"
+            value={localFiltros.busca}
+            onChange={(e) => setLocalFiltros({ ...localFiltros, busca: e.target.value })}
+            placeholder="Digite o nome do local..."
+            style={{
+              width: '100%',
+              padding: 10,
+              borderRadius: 8,
+              border: '1px solid #333',
+              backgroundColor: '#1A1A1A',
+              color: '#FFF',
+              fontSize: 12
+            }}
+          />
+        </div>
+        
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <label style={{ color: '#AAA', fontSize: 12 }}>Tipos de Local</label>
+            <button
+              onClick={handleSelectAll}
+              style={{
+                fontSize: 11,
+                color: '#3B82F6',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer'
+              }}
+            >
+              {localFiltros.tipos.length === Object.keys(TIPOS_LOCAL_CONFIG).length ? 'Desmarcar Todos' : 'Marcar Todos'}
+            </button>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            {Object.entries(TIPOS_LOCAL_CONFIG).map(([key, config]) => (
+              <label
+                key={key}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  padding: '8px 10px',
+                  borderRadius: 8,
+                  backgroundColor: localFiltros.tipos.includes(key as TipoLocal) ? `${config.cor}20` : '#111',
+                  border: `1px solid ${localFiltros.tipos.includes(key as TipoLocal) ? config.cor : '#333'}`,
+                  cursor: 'pointer',
+                  transition: 'all 0.2s'
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={localFiltros.tipos.includes(key as TipoLocal)}
+                  onChange={() => handleToggleTipo(key as TipoLocal)}
+                  style={{ cursor: 'pointer' }}
+                />
+                <span style={{ fontSize: 14 }}>{config.icon}</span>
+                <span style={{ fontSize: 11, color: '#FFF' }}>{config.label}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+        
+        <div>
+          <label style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            padding: '10px',
+            borderRadius: 8,
+            backgroundColor: '#111',
+            border: '1px solid #333',
+            cursor: 'pointer'
+          }}>
+            <input
+              type="checkbox"
+              checked={localFiltros.apenasComVeiculos}
+              onChange={(e) => setLocalFiltros({ ...localFiltros, apenasComVeiculos: e.target.checked })}
+              style={{ cursor: 'pointer' }}
+            />
+            <span style={{ fontSize: 12, color: '#FFF' }}>
+              Mostrar apenas locais com veículos dentro
+            </span>
+          </label>
+        </div>
+        
+        <div style={{
+          padding: '10px',
+          borderRadius: 8,
+          backgroundColor: '#111',
+          textAlign: 'center'
+        }}>
+          <span style={{ fontSize: 12, color: '#AAA' }}>
+            📍 Mostrando <strong style={{ color: '#FFD700' }}>{filteredCount}</strong> de <strong>{totalLocais}</strong> locais
+          </span>
+        </div>
+        
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 8 }}>
+          <button
+            onClick={handleReset}
+            style={{
+              padding: 10,
+              borderRadius: 8,
+              border: '1px solid #EF4444',
+              backgroundColor: 'transparent',
+              color: '#EF4444',
+              cursor: 'pointer',
+              fontSize: 12,
+              fontWeight: 600
+            }}
+          >
+            <FilterX size={14} style={{ display: 'inline', marginRight: 4 }} />
+            Limpar Filtros
+          </button>
+          <button
+            onClick={handleApply}
+            style={{
+              padding: 10,
+              borderRadius: 8,
+              border: 'none',
+              backgroundColor: '#EC4899',
+              color: '#FFF',
+              cursor: 'pointer',
+              fontSize: 12,
+              fontWeight: 600
+            }}
+          >
+            <Filter size={14} style={{ display: 'inline', marginRight: 4 }} />
+            Aplicar Filtros
           </button>
         </div>
       </div>
@@ -718,98 +940,906 @@ const FilterPanel: React.FC<{
 };
 
 // ============================================
-// COMPONENTE PRINCIPAL
+// ÍCONES PERSONALIZADOS
 // ============================================
 
-const VisaoMapaLV: React.FC<VisaoMapaProps> = ({
-  veiculos,
-  cargasPorVeiculo,
-  onRefresh,
+const createVehicleIcon = (statusRastreador: string, placa: string, tipo: string, carga: any, motorista?: string) => {
+  const rastreadorConfig = STATUS_RASTREADOR_CONFIG[statusRastreador] || STATUS_RASTREADOR_CONFIG['offline'];
+  const cargaConfig = getStatusCargaInfo(carga?.status);
+  const tipoInfo = getTipoVeiculoInfo(tipo);
+  const corPrincipal = rastreadorConfig.cor;
+  
+  const canvas = document.createElement('canvas');
+  canvas.width = 50;
+  canvas.height = 50;
+  const ctx = canvas.getContext('2d');
+  
+  if (ctx) {
+    ctx.beginPath();
+    ctx.arc(25, 25, 22, 0, 2 * Math.PI);
+    ctx.fillStyle = `${corPrincipal}20`;
+    ctx.fill();
+    ctx.strokeStyle = corPrincipal;
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+    
+    ctx.fillStyle = corPrincipal;
+    ctx.font = '26px "Segoe UI Emoji"';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(tipoInfo.icone, 25, 27);
+    
+    ctx.beginPath();
+    ctx.arc(38, 38, 7, 0, 2 * Math.PI);
+    ctx.fillStyle = cargaConfig.cor;
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 11px "Segoe UI"';
+    ctx.fillText(carga ? '📦' : '○', 38, 41);
+  }
+  
+  const motoristaText = motorista ? `👨‍✈️ ${motorista.length > 12 ? motorista.substring(0, 10) + '..' : motorista}` : '';
+  
+  const htmlContent = `
+    <div style="position: relative; display: inline-block; cursor: pointer;">
+      <img src="${canvas.toDataURL()}" style="width: 50px; height: 50px; display: block;" />
+      <div style="
+        position: absolute;
+        top: -28px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(0, 0, 0, 0.85);
+        backdrop-filter: blur(8px);
+        color: white;
+        padding: 4px 10px;
+        border-radius: 20px;
+        font-size: 10px;
+        font-weight: 600;
+        white-space: nowrap;
+        border: 1px solid ${corPrincipal};
+        box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        pointer-events: none;
+        z-index: 10;
+        font-family: 'Segoe UI', sans-serif;
+      ">
+        ${tipoInfo.icone} ${placa} • ${rastreadorConfig.label}
+      </div>
+      ${motoristaText ? `<div style="
+        position: absolute;
+        top: 32px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(0, 0, 0, 0.7);
+        backdrop-filter: blur(4px);
+        color: #FFD700;
+        padding: 2px 6px;
+        border-radius: 12px;
+        font-size: 8px;
+        font-weight: 500;
+        white-space: nowrap;
+        pointer-events: none;
+        font-family: 'Segoe UI', sans-serif;
+      ">
+        ${motoristaText}
+      </div>` : ''}
+    </div>
+  `;
+  
+  return L.divIcon({
+    html: htmlContent,
+    className: 'custom-vehicle-icon',
+    iconSize: [50, 70],
+    iconAnchor: [25, 50],
+    popupAnchor: [0, -50]
+  });
+};
+
+const createLocalIcon = (tipo: TipoLocal) => {
+  const config = TIPOS_LOCAL_CONFIG[tipo];
+  return L.divIcon({
+    html: `<div style="
+      background: linear-gradient(135deg, ${config.cor}, ${config.cor}dd);
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 3px solid white;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.4), 0 0 0 2px ${config.cor}40;
+      cursor: pointer;
+      font-size: 22px;
+      transition: transform 0.2s;
+    ">
+      ${config.icon}
+    </div>`,
+    className: 'local-marker-icon',
+    iconSize: [40, 40],
+    iconAnchor: [20, 40],
+    popupAnchor: [0, -40]
+  });
+};
+
+// ============================================
+// COMPONENTES AUXILIARES
+// ============================================
+
+function MapController({ center, zoom }: { center?: [number, number]; zoom?: number }) {
+  const map = useMap();
+  
+  useEffect(() => {
+    if (center && center[0] !== 0 && center[1] !== 0) {
+      map.setView(center, zoom || 12);
+    }
+  }, [center, zoom, map]);
+  
+  return null;
+}
+
+function MapaClickHandler({ onMapClick }: { onMapClick: (lat: number, lng: number) => void }) {
+  useMapEvents({
+    click(e) {
+      onMapClick(e.latlng.lat, e.latlng.lng);
+    },
+  });
+  return null;
+}
+
+// ============================================
+// COMPONENTE: CADASTRO DE LOCAL COM GEOFENCE
+// ============================================
+
+interface CadastroLocalPanelProps {
+  local?: LocalComGeofence | null;
+  onSalvar: (local: LocalComGeofence) => void;
+  onCancelar: () => void;
+}
+
+const CadastroLocalPanel: React.FC<CadastroLocalPanelProps> = ({ local, onSalvar, onCancelar }) => {
+  const [formData, setFormData] = useState({
+    nome: '',
+    tipo: 'cliente_homologado' as TipoLocal,
+    cidade: '',
+    uf: '',
+    observacao: '',
+    alertaSom: true,
+    alertaVisual: true,
+  });
+  const [coordenadas, setCoordenadas] = useState<{ lat: number; lng: number } | null>(null);
+  const [cercaTipo, setCercaTipo] = useState<'circulo' | 'poligono'>('circulo');
+  const [raio, setRaio] = useState(500);
+  const [pontosCerca, setPontosCerca] = useState<Array<{ lat: number; lng: number }>>([]);
+  const [erro, setErro] = useState<string | null>(null);
+  const [buscando, setBuscando] = useState(false);
+  const [adicionandoPontos, setAdicionandoPontos] = useState(false);
+
+  useEffect(() => {
+    if (local) {
+      setFormData({
+        nome: local.nome,
+        tipo: local.tipo,
+        cidade: local.cidade,
+        uf: local.uf,
+        observacao: local.observacao,
+        alertaSom: local.alertaSom ?? true,
+        alertaVisual: local.alertaVisual ?? true,
+      });
+      setCoordenadas(local.coordenadas);
+      setCercaTipo(local.cerca.tipo);
+      if (local.cerca.tipo === 'circulo' && local.cerca.raio) {
+        setRaio(local.cerca.raio);
+      } else if (local.cerca.tipo === 'poligono' && local.cerca.pontos) {
+        setPontosCerca(local.cerca.pontos);
+      }
+    }
+  }, [local]);
+
+  const buscarLocalizacao = async () => {
+    if (!formData.cidade || !formData.uf) {
+      setErro('Preencha a cidade e UF para buscar');
+      return;
+    }
+
+    setBuscando(true);
+    setErro(null);
+
+    const query = `${formData.cidade}, ${formData.uf}, Brasil`;
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1`;
+
+    try {
+      const response = await fetch(url);
+      const data = await response.json();
+      if (data && data.length > 0) {
+        setCoordenadas({ lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) });
+      } else {
+        setErro('Localização não encontrada');
+      }
+    } catch {
+      setErro('Erro ao buscar localização');
+    } finally {
+      setBuscando(false);
+    }
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formData.nome.trim()) { setErro('Nome é obrigatório'); return; }
+    if (!formData.cidade.trim()) { setErro('Cidade é obrigatória'); return; }
+    if (!formData.uf.trim()) { setErro('UF é obrigatória'); return; }
+    if (!coordenadas) { setErro('Selecione a localização no mapa'); return; }
+    if (cercaTipo === 'poligono' && pontosCerca.length < 3) { setErro('Polígono precisa de pelo menos 3 pontos'); return; }
+
+    const cerca: Cerca = cercaTipo === 'circulo'
+      ? { id: Date.now().toString(), tipo: 'circulo', raio }
+      : { id: Date.now().toString(), tipo: 'poligono', pontos: pontosCerca };
+
+    onSalvar({
+      id: local?.id || Date.now().toString(),
+      nome: formData.nome.trim(),
+      tipo: formData.tipo,
+      cidade: formData.cidade.trim(),
+      uf: formData.uf.trim().toUpperCase(),
+      observacao: formData.observacao,
+      coordenadas,
+      cerca,
+      createdAt: local?.createdAt || new Date().toISOString(),
+      alertaSom: formData.alertaSom,
+      alertaVisual: formData.alertaVisual,
+    });
+  };
+
+  const config = TIPOS_LOCAL_CONFIG[formData.tipo];
+
+  return (
+    <div style={{
+      position: 'absolute',
+      right: 20,
+      top: 90,
+      width: '420px',
+      backgroundColor: '#0A0A0A',
+      borderRadius: '16px',
+      border: '1px solid #333',
+      zIndex: 1000,
+      maxHeight: 'calc(100vh - 120px)',
+      overflowY: 'auto',
+      boxShadow: '0 8px 24px rgba(0,0,0,0.5)'
+    }}>
+      <div style={{
+        padding: '16px 20px',
+        borderBottom: '1px solid #222',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        background: `linear-gradient(135deg, ${config.cor}20, transparent)`
+      }}>
+        <h3 style={{ margin: 0, color: '#FFF', fontSize: '16px' }}>
+          {config.icon} {local ? 'Editar' : 'Novo'} {config.label}
+        </h3>
+        <button onClick={onCancelar} style={{ background: 'none', border: 'none', color: '#888', cursor: 'pointer' }}>
+          <X size={20} />
+        </button>
+      </div>
+
+      <form onSubmit={handleSubmit} style={{ padding: '20px' }}>
+        <div style={{ marginBottom: '16px' }}>
+          <label style={{ display: 'block', marginBottom: '6px', color: '#AAA', fontSize: '12px' }}>Tipo de Local *</label>
+          <select
+            value={formData.tipo}
+            onChange={(e) => setFormData({ ...formData, tipo: e.target.value as TipoLocal })}
+            style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #333', backgroundColor: '#1A1A1A', color: '#FFF' }}
+          >
+            {Object.entries(TIPOS_LOCAL_CONFIG).map(([key, val]) => (
+              <option key={key} value={key}>{val.icon} {val.label}</option>
+            ))}
+          </select>
+        </div>
+
+        <div style={{ marginBottom: '16px' }}>
+          <label style={{ display: 'block', marginBottom: '6px', color: '#AAA', fontSize: '12px' }}>Nome do Local *</label>
+          <input
+            type="text"
+            value={formData.nome}
+            onChange={(e) => setFormData({ ...formData, nome: e.target.value })}
+            style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #333', backgroundColor: '#1A1A1A', color: '#FFF' }}
+          />
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '12px', marginBottom: '16px' }}>
+          <div>
+            <label style={{ display: 'block', marginBottom: '6px', color: '#AAA', fontSize: '12px' }}>Cidade *</label>
+            <input
+              type="text"
+              value={formData.cidade}
+              onChange={(e) => setFormData({ ...formData, cidade: e.target.value })}
+              style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #333', backgroundColor: '#1A1A1A', color: '#FFF' }}
+            />
+          </div>
+          <div style={{ width: '70px' }}>
+            <label style={{ display: 'block', marginBottom: '6px', color: '#AAA', fontSize: '12px' }}>UF *</label>
+            <input
+              type="text"
+              value={formData.uf}
+              onChange={(e) => setFormData({ ...formData, uf: e.target.value.toUpperCase().slice(0, 2) })}
+              maxLength={2}
+              style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #333', backgroundColor: '#1A1A1A', color: '#FFF', textAlign: 'center' }}
+            />
+          </div>
+        </div>
+
+        <div style={{ marginBottom: '16px' }}>
+          <label style={{ display: 'block', marginBottom: '6px', color: '#AAA', fontSize: '12px' }}>Observação</label>
+          <textarea
+            value={formData.observacao}
+            onChange={(e) => setFormData({ ...formData, observacao: e.target.value })}
+            rows={2}
+            style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #333', backgroundColor: '#1A1A1A', color: '#FFF', resize: 'vertical' }}
+          />
+        </div>
+
+        <div style={{ marginBottom: '16px', padding: '12px', backgroundColor: '#111', borderRadius: '8px', border: '1px solid #222' }}>
+          <div style={{ marginBottom: '10px' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#FFF', fontSize: '12px', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={formData.alertaSom}
+                onChange={(e) => setFormData({ ...formData, alertaSom: e.target.checked })}
+                style={{ cursor: 'pointer' }}
+              />
+              <Volume2 size={14} /> Alerta Sonoro
+            </label>
+          </div>
+          <div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#FFF', fontSize: '12px', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={formData.alertaVisual}
+                onChange={(e) => setFormData({ ...formData, alertaVisual: e.target.checked })}
+                style={{ cursor: 'pointer' }}
+              />
+              <Bell size={14} /> Alerta Visual
+            </label>
+          </div>
+        </div>
+
+        <div style={{ marginBottom: '16px' }}>
+          <label style={{ display: 'block', marginBottom: '6px', color: '#AAA', fontSize: '12px' }}>Tipo de Cerca *</label>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+            <button
+              type="button"
+              onClick={() => setCercaTipo('circulo')}
+              style={{
+                padding: '10px',
+                borderRadius: '8px',
+                border: cercaTipo === 'circulo' ? `2px solid ${config.cor}` : '1px solid #333',
+                backgroundColor: cercaTipo === 'circulo' ? `${config.cor}20` : '#1A1A1A',
+                color: cercaTipo === 'circulo' ? config.cor : '#AAA',
+                cursor: 'pointer',
+                fontSize: '12px',
+                fontWeight: 600
+              }}
+            >
+              ⭕ Circular
+            </button>
+            <button
+              type="button"
+              onClick={() => setCercaTipo('poligono')}
+              style={{
+                padding: '10px',
+                borderRadius: '8px',
+                border: cercaTipo === 'poligono' ? `2px solid ${config.cor}` : '1px solid #333',
+                backgroundColor: cercaTipo === 'poligono' ? `${config.cor}20` : '#1A1A1A',
+                color: cercaTipo === 'poligono' ? config.cor : '#AAA',
+                cursor: 'pointer',
+                fontSize: '12px',
+                fontWeight: 600
+              }}
+            >
+              🔷 Polígono
+            </button>
+          </div>
+        </div>
+
+        {cercaTipo === 'circulo' && (
+          <div style={{ marginBottom: '16px' }}>
+            <label style={{ display: 'block', marginBottom: '6px', color: '#AAA', fontSize: '12px' }}>
+              Raio da Cerca: {raio}m
+            </label>
+            <input
+              type="range"
+              min="50"
+              max="5000"
+              step="50"
+              value={raio}
+              onChange={(e) => setRaio(parseInt(e.target.value))}
+              style={{ width: '100%' }}
+            />
+          </div>
+        )}
+
+        <div style={{ marginBottom: '16px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+            <label style={{ color: '#AAA', fontSize: '12px' }}>📍 Localização (clique no mapa)</label>
+            <button
+              type="button"
+              onClick={buscarLocalizacao}
+              disabled={buscando}
+              style={{ padding: '4px 12px', fontSize: '11px', borderRadius: '6px', border: `1px solid ${config.cor}`, background: 'transparent', color: config.cor, cursor: 'pointer' }}
+            >
+              <Target size={12} style={{ display: 'inline', marginRight: '4px' }} />
+              {buscando ? 'Buscando...' : 'Buscar cidade'}
+            </button>
+          </div>
+          <div style={{ height: '250px', borderRadius: '8px', overflow: 'hidden', border: '1px solid #333' }}>
+            <MapContainer
+              center={coordenadas ? [coordenadas.lat, coordenadas.lng] : [-15.7797, -47.9297]}
+              zoom={13}
+              style={{ height: '100%', width: '100%' }}
+            >
+              <TileLayer url="https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}" />
+              <TileLayer url="https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}" />
+              <MapaClickHandler onMapClick={(lat, lng) => {
+                if (cercaTipo === 'poligono' && adicionandoPontos) {
+                  setPontosCerca([...pontosCerca, { lat, lng }]);
+                } else {
+                  setCoordenadas({ lat, lng });
+                }
+              }} />
+              {coordenadas && (
+                <Marker position={[coordenadas.lat, coordenadas.lng]} icon={createLocalIcon(formData.tipo)}>
+                  <Popup>📍 Centro do local</Popup>
+                </Marker>
+              )}
+              {cercaTipo === 'circulo' && coordenadas && (
+                <Circle
+                  center={[coordenadas.lat, coordenadas.lng]}
+                  radius={raio}
+                  pathOptions={{ color: config.cor, fillColor: config.cor, fillOpacity: 0.1 }}
+                />
+              )}
+              {cercaTipo === 'poligono' && pontosCerca.length > 0 && (
+                <>
+                  {pontosCerca.map((ponto, idx) => (
+                    <Marker key={idx} position={[ponto.lat, ponto.lng]}>
+                      <Popup>Ponto {idx + 1}</Popup>
+                    </Marker>
+                  ))}
+                  {pontosCerca.length >= 2 && (
+                    <Polygon
+                      positions={pontosCerca.map(p => [p.lat, p.lng])}
+                      pathOptions={{ color: config.cor, fillColor: config.cor, fillOpacity: 0.1 }}
+                    />
+                  )}
+                </>
+              )}
+            </MapContainer>
+          </div>
+          {cercaTipo === 'poligono' && (
+            <div style={{ marginTop: '8px', display: 'flex', gap: '8px' }}>
+              <button
+                type="button"
+                onClick={() => setAdicionandoPontos(!adicionandoPontos)}
+                style={{
+                  flex: 1,
+                  padding: '8px',
+                  fontSize: '11px',
+                  borderRadius: '6px',
+                  border: `1px solid ${config.cor}`,
+                  background: adicionandoPontos ? `${config.cor}20` : 'transparent',
+                  color: config.cor,
+                  cursor: 'pointer',
+                  fontWeight: 600
+                }}
+              >
+                {adicionandoPontos ? '✓ Adicionando pontos...' : '+ Adicionar pontos'}
+              </button>
+              {pontosCerca.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setPontosCerca(pontosCerca.slice(0, -1))}
+                  style={{
+                    padding: '8px 12px',
+                    fontSize: '11px',
+                    borderRadius: '6px',
+                    border: '1px solid #EF4444',
+                    background: 'transparent',
+                    color: '#EF4444',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Desfazer ({pontosCerca.length})
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
+        {erro && (
+          <div style={{ padding: '10px', backgroundColor: '#EF444420', borderRadius: '8px', border: '1px solid #EF4444', marginBottom: '16px' }}>
+            <p style={{ margin: 0, fontSize: '12px', color: '#FFF' }}>⚠️ {erro}</p>
+          </div>
+        )}
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+          <button
+            type="button"
+            onClick={onCancelar}
+            style={{ padding: '10px', borderRadius: '8px', border: '1px solid #333', backgroundColor: '#1A1A1A', color: '#FFF', cursor: 'pointer', fontWeight: 600 }}
+          >
+            Cancelar
+          </button>
+          <button
+            type="submit"
+            style={{ padding: '10px', borderRadius: '8px', border: 'none', backgroundColor: config.cor, color: '#000', cursor: 'pointer', fontWeight: 600 }}
+          >
+            <Save size={14} style={{ display: 'inline', marginRight: '4px' }} />
+            Salvar
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+};
+
+// ============================================
+// COMPONENTE: LISTA DE LOCAIS
+// ============================================
+
+interface ListaLocaisPanelProps {
+  locais: LocalComGeofence[];
+  onEditar: (local: LocalComGeofence) => void;
+  onExcluir: (id: string) => void;
+  onClose: () => void;
+}
+
+const ListaLocaisPanel: React.FC<ListaLocaisPanelProps> = ({ locais, onEditar, onExcluir, onClose }) => {
+  const [busca, setBusca] = useState('');
+  const [filtroTipo, setFiltroTipo] = useState<TipoLocal | 'todos'>('todos');
+
+  const locaisFiltrados = useMemo(() => {
+    return locais.filter(local => {
+      if (filtroTipo !== 'todos' && local.tipo !== filtroTipo) return false;
+      if (busca && !local.nome.toLowerCase().includes(busca.toLowerCase())) return false;
+      return true;
+    });
+  }, [locais, busca, filtroTipo]);
+
+  return (
+    <div style={{
+      position: 'absolute',
+      right: 20,
+      top: 90,
+      width: '380px',
+      backgroundColor: '#0A0A0A',
+      borderRadius: '16px',
+      border: '1px solid #333',
+      zIndex: 1000,
+      maxHeight: 'calc(100vh - 120px)',
+      overflowY: 'auto',
+      boxShadow: '0 8px 24px rgba(0,0,0,0.5)'
+    }}>
+      <div style={{
+        padding: '16px 20px',
+        borderBottom: '1px solid #222',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center'
+      }}>
+        <h3 style={{ margin: 0, color: '#FFF', fontSize: '16px' }}>
+          📍 Locais Cadastrados ({locais.length})
+        </h3>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#888', cursor: 'pointer' }}>
+          <X size={20} />
+        </button>
+      </div>
+
+      <div style={{ padding: '16px 20px' }}>
+        <div style={{ position: 'relative', marginBottom: '12px' }}>
+          <input
+            type="text"
+            placeholder="Buscar local..."
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
+            style={{ width: '100%', padding: '10px 10px 10px 35px', borderRadius: '8px', border: '1px solid #333', backgroundColor: '#1A1A1A', color: '#FFF' }}
+          />
+          <MapPin size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: '#666' }} />
+        </div>
+
+        <select
+          value={filtroTipo}
+          onChange={(e) => setFiltroTipo(e.target.value as any)}
+          style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid #333', backgroundColor: '#1A1A1A', color: '#FFF', marginBottom: '16px', fontSize: '12px' }}
+        >
+          <option value="todos">Todos os tipos</option>
+          {Object.entries(TIPOS_LOCAL_CONFIG).map(([key, val]) => (
+            <option key={key} value={key}>{val.icon} {val.label}</option>
+          ))}
+        </select>
+
+        {locaisFiltrados.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '40px 20px', color: '#666' }}>
+            <MapPin size={32} style={{ marginBottom: '12px', opacity: 0.5 }} />
+            <p>Nenhum local cadastrado</p>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            {locaisFiltrados.map(local => {
+              const config = TIPOS_LOCAL_CONFIG[local.tipo];
+              return (
+                <div key={local.id} style={{ padding: '12px', backgroundColor: '#111', borderRadius: '10px', border: `1px solid ${config.cor}40` }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                        <span style={{ fontSize: '16px' }}>{config.icon}</span>
+                        <span style={{ fontWeight: 600, color: '#FFF', fontSize: '13px' }}>{local.nome}</span>
+                      </div>
+                      <div style={{ fontSize: '11px', color: '#AAA', marginBottom: '4px' }}>
+                        🏷️ {config.label}
+                      </div>
+                      <div style={{ fontSize: '11px', color: '#AAA', marginBottom: '4px' }}>
+                        📍 {local.cidade}, {local.uf}
+                      </div>
+                      {local.cerca.tipo === 'circulo' && (
+                        <div style={{ fontSize: '10px', color: '#888' }}>
+                          ⭕ Raio: {local.cerca.raio}m
+                        </div>
+                      )}
+                      {local.cerca.tipo === 'poligono' && (
+                        <div style={{ fontSize: '10px', color: '#888' }}>
+                          🔷 Polígono: {local.cerca.pontos?.length} pontos
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <button onClick={() => onEditar(local)} style={{ padding: '4px 8px', borderRadius: '6px', border: `1px solid ${config.cor}`, background: 'transparent', color: config.cor, cursor: 'pointer', fontSize: '11px' }}>
+                        <Edit size={12} />
+                      </button>
+                      <button onClick={() => onExcluir(local.id)} style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid #EF4444', background: 'transparent', color: '#EF4444', cursor: 'pointer', fontSize: '11px' }}>
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ============================================
+// COMPONENTE: HISTÓRICO DE PERMANÊNCIA
+// ============================================
+
+interface HistoricoPermanenciaProps {
+  historico: HistoricoVisita[];
+  locais: LocalComGeofence[];
+  veiculos: VeiculoComLocalizacao[];
+  onClose: () => void;
+}
+
+const HistoricoPermanenciaPanel: React.FC<HistoricoPermanenciaProps> = ({ historico, locais, veiculos, onClose }) => {
+  const [filtroLocal, setFiltroLocal] = useState<string>('todos');
+
+  const historicoFiltrado = useMemo(() => {
+    return historico.filter(h => filtroLocal === 'todos' || h.localId === filtroLocal);
+  }, [historico, filtroLocal]);
+
+  return (
+    <div style={{
+      position: 'absolute',
+      left: 20,
+      top: 90,
+      width: '400px',
+      backgroundColor: '#0A0A0A',
+      borderRadius: '16px',
+      border: '1px solid #333',
+      zIndex: 1000,
+      maxHeight: 'calc(100vh - 120px)',
+      overflowY: 'auto',
+      boxShadow: '0 8px 24px rgba(0,0,0,0.5)'
+    }}>
+      <div style={{
+        padding: '16px 20px',
+        borderBottom: '1px solid #222',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center'
+      }}>
+        <h3 style={{ margin: 0, color: '#FFF', fontSize: '16px' }}>
+          ⏱️ Histórico de Permanência
+        </h3>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#888', cursor: 'pointer' }}>
+          <X size={20} />
+        </button>
+      </div>
+
+      <div style={{ padding: '16px 20px' }}>
+        <select
+          value={filtroLocal}
+          onChange={(e) => setFiltroLocal(e.target.value)}
+          style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid #333', backgroundColor: '#1A1A1A', color: '#FFF', marginBottom: '16px', fontSize: '12px' }}
+        >
+          <option value="todos">Todos os locais</option>
+          {locais.map(local => (
+            <option key={local.id} value={local.id}>{local.nome}</option>
+          ))}
+        </select>
+
+        {historicoFiltrado.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '40px 20px', color: '#666' }}>
+            <History size={32} style={{ marginBottom: '12px', opacity: 0.5 }} />
+            <p>Nenhum registro de permanência</p>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            {historicoFiltrado.map(registro => {
+              const local = locais.find(l => l.id === registro.localId);
+              const veiculo = veiculos.find(v => v.id === registro.motoristaId);
+              const config = local ? TIPOS_LOCAL_CONFIG[local.tipo] : null;
+              
+              return (
+                <div key={registro.id} style={{ padding: '12px', backgroundColor: '#111', borderRadius: '10px', border: `1px solid ${config?.cor}40` }}>
+                  <div style={{ marginBottom: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                      <span style={{ fontSize: '14px' }}>{config?.icon}</span>
+                      <span style={{ fontWeight: 600, color: config?.cor, fontSize: '12px' }}>{local?.nome}</span>
+                    </div>
+                    <div style={{ fontSize: '11px', color: '#AAA' }}>
+                      🚛 {veiculo?.placa || 'Veículo desconhecido'}
+                    </div>
+                  </div>
+                  <div style={{ fontSize: '10px', color: '#888', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                    <div>
+                      📥 {new Date(registro.dataEntrada).toLocaleString('pt-BR')}
+                    </div>
+                    <div>
+                      📤 {new Date(registro.dataSaida).toLocaleString('pt-BR')}
+                    </div>
+                  </div>
+                  <div style={{ marginTop: '8px', padding: '8px', backgroundColor: '#1A1A1A', borderRadius: '6px', textAlign: 'center' }}>
+                    <span style={{ fontSize: '12px', fontWeight: 600, color: config?.cor }}>
+                      ⏱️ {formatarTempo(registro.tempoTotalMinutos)}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ============================================
+// COMPONENTE PRINCIPAL: VISÃO MAPA LV
+// ============================================
+
+const VisaoMapaLV: React.FC<VisaoMapaProps> = ({ 
+  veiculos, 
+  cargasPorVeiculo = {},
+  onRefresh, 
   onBack,
-  loading = false
+  loading = false 
 }) => {
   const [centroMapa, setCentroMapa] = useState<[number, number]>([-15.7797, -47.9297]);
   const [mapaZoom, setMapaZoom] = useState(12);
+  const [showCadastroLocal, setShowCadastroLocal] = useState(false);
+  const [showListaLocais, setShowListaLocais] = useState(false);
+  const [showHistorico, setShowHistorico] = useState(false);
   const [showFilterPanel, setShowFilterPanel] = useState(false);
+  const [showFilterLocaisPanel, setShowFilterLocaisPanel] = useState(false);
+  const [showLegenda, setShowLegenda] = useState(false);
+  const [localEditando, setLocalEditando] = useState<LocalComGeofence | null>(null);
+  const [locais, setLocais] = useState<LocalComGeofence[]>([]);
+  const [historico, setHistorico] = useState<HistoricoVisita[]>([]);
+  const [registrosPermanencia, setRegistrosPermanencia] = useState<RegistroPermanencia[]>([]);
+  
   const [filtros, setFiltros] = useState({
     statusRastreador: 'todos',
     tipo: 'todos',
     placa: '',
     apenasComCarga: false
   });
-
+  
+  const [filtrosLocais, setFiltrosLocais] = useState({
+    tipos: [] as TipoLocal[],
+    busca: '',
+    apenasComVeiculos: false
+  });
+  
   const mapRef = useRef<L.Map | null>(null);
   const [mapInstance, setMapInstance] = useState<L.Map | null>(null);
 
-  // Filtrar veículos com coordenadas válidas
-  const veiculosComLocalizacao = useMemo(() => {
-    return veiculos.filter(v =>
-      v.coordenadas &&
-      typeof v.coordenadas.lat === 'number' &&
-      typeof v.coordenadas.lng === 'number' &&
-      !isNaN(v.coordenadas.lat) &&
-      !isNaN(v.coordenadas.lng) &&
-      v.coordenadas.lat !== 0 &&
-      v.coordenadas.lng !== 0
-    );
-  }, [veiculos]);
-
-  // Aplicar filtros
-  const veiculosFiltrados = useMemo(() => {
-    return veiculosComLocalizacao.filter(v => {
-      // Filtro por status do rastreador
-      if (filtros.statusRastreador !== 'todos') {
-        const status = v.statusRastreador || 'offline';
-        if (status !== filtros.statusRastreador) return false;
-      }
-
-      // Filtro por tipo de veículo
-      if (filtros.tipo !== 'todos' && v.tipo !== filtros.tipo) return false;
-
-      // Filtro por placa
-      if (filtros.placa && !v.placa.toLowerCase().includes(filtros.placa.toLowerCase())) return false;
-
-      // Filtro "apenas com carga"
-      if (filtros.apenasComCarga) {
-        const temCarga = cargasPorVeiculo[v.id] !== null && cargasPorVeiculo[v.id] !== undefined;
-        if (!temCarga) return false;
-      }
-
-      return true;
-    });
-  }, [veiculosComLocalizacao, filtros, cargasPorVeiculo]);
-
-  // Estatísticas
-  const stats = useMemo(() => {
-    const total = veiculosComLocalizacao.length;
-    const online = veiculosComLocalizacao.filter(v => v.statusRastreador === 'online').length;
-    const offline = veiculosComLocalizacao.filter(v => v.statusRastreador === 'offline').length;
-    const parado = veiculosComLocalizacao.filter(v => v.statusRastreador === 'parado').length;
-    const filtrados = veiculosFiltrados.length;
-    return { total, online, offline, parado, filtrados, comLocalizacao: total };
-  }, [veiculosComLocalizacao, veiculosFiltrados]);
-
-  // Centralizar mapa nos veículos
+  // Carregar dados do localStorage
   useEffect(() => {
-    if (veiculosFiltrados.length > 0 && !showFilterPanel) {
-      const somaLat = veiculosFiltrados.reduce((sum, v) => sum + v.coordenadas!.lat, 0);
-      const somaLng = veiculosFiltrados.reduce((sum, v) => sum + v.coordenadas!.lng, 0);
-      const centroLat = somaLat / veiculosFiltrados.length;
-      const centroLng = somaLng / veiculosFiltrados.length;
-      setCentroMapa([centroLat, centroLng]);
+    const savedLocais = localStorage.getItem('locais_geofence');
+    let locaisCarregados: LocalComGeofence[] = [];
+    
+    if (savedLocais) {
+      try { locaisCarregados = JSON.parse(savedLocais); } catch (e) { console.error(e); }
     }
-  }, [veiculosFiltrados, showFilterPanel]);
 
-  // Função para centralizar na localização do usuário
+    const antigoClientes = localStorage.getItem('clientes_geofence');
+    if (antigoClientes) {
+      try {
+        const clientesAntigos = JSON.parse(antigoClientes);
+        if (Array.isArray(clientesAntigos) && clientesAntigos.length > 0) {
+          const clientesMigrados: LocalComGeofence[] = clientesAntigos.map((c: any) => ({
+            id: c.id || Date.now().toString() + Math.random(),
+            nome: c.nome,
+            tipo: 'cliente_homologado',
+            cidade: c.cidade,
+            uf: c.uf,
+            observacao: c.observacao || '',
+            coordenadas: c.coordenadas,
+            cerca: {
+              id: Date.now().toString() + Math.random(),
+              tipo: 'circulo',
+              raio: 500
+            },
+            createdAt: c.createdAt || new Date().toISOString(),
+            alertaSom: true,
+            alertaVisual: true
+          }));
+
+          const idsExistentes = new Set(locaisCarregados.map(l => l.id));
+          const novosMigrados = clientesMigrados.filter(c => !idsExistentes.has(c.id));
+          
+          if (novosMigrados.length > 0) {
+            locaisCarregados = [...locaisCarregados, ...novosMigrados];
+            localStorage.setItem('locais_geofence', JSON.stringify(locaisCarregados));
+          }
+        }
+      } catch (e) {
+        console.error('Erro na migração de dados:', e);
+      }
+    }
+
+    setLocais(locaisCarregados);
+
+    const savedHistorico = localStorage.getItem('historico_permanencia');
+    if (savedHistorico) {
+      try { setHistorico(JSON.parse(savedHistorico)); } catch (e) { console.error(e); }
+    }
+  }, []);
+
+  const salvarLocais = (novosLocais: LocalComGeofence[]) => {
+    setLocais(novosLocais);
+    localStorage.setItem('locais_geofence', JSON.stringify(novosLocais));
+  };
+
+  const handleSalvarLocal = (local: LocalComGeofence) => {
+    const index = locais.findIndex(l => l.id === local.id);
+    const novosLocais = index !== -1 
+      ? [...locais.slice(0, index), local, ...locais.slice(index + 1)]
+      : [...locais, local];
+    salvarLocais(novosLocais);
+    setShowCadastroLocal(false);
+    setLocalEditando(null);
+  };
+
+  const handleExcluirLocal = (id: string) => {
+    if (window.confirm('Tem certeza que deseja excluir este local?')) {
+      salvarLocais(locais.filter(l => l.id !== id));
+    }
+  };
+
+  const handleNavigateTo = (lat: number, lng: number) => {
+    if (mapInstance) {
+      mapInstance.setView([lat, lng], 15);
+    }
+    setCentroMapa([lat, lng]);
+  };
+
   const handleLocateUser = () => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
           const { latitude, longitude } = position.coords;
-          if (mapInstance) {
-            mapInstance.setView([latitude, longitude], 14);
-          }
-          setCentroMapa([latitude, longitude]);
+          handleNavigateTo(latitude, longitude);
         },
         (error) => {
           console.error('Erro ao obter localização:', error);
@@ -818,30 +1848,219 @@ const VisaoMapaLV: React.FC<VisaoMapaProps> = ({
     }
   };
 
-  // Adicionar CSS para o efeito de tooltip
+  // Monitorar geofences
   useEffect(() => {
-    const style = document.createElement('style');
-    style.textContent = `
-      .custom-vehicle-icon:hover .vehicle-tooltip {
-        opacity: 1 !important;
+    const interval = setInterval(() => {
+      veiculos.forEach(veiculo => {
+        locais.forEach(local => {
+          const estaEmGeofence = veiculoEmGeofence(veiculo, local);
+          const registroAtivo = registrosPermanencia.find(r => 
+            r.motoristaId === veiculo.id && 
+            r.localId === local.id && 
+            r.ativo
+          );
+
+          if (estaEmGeofence && !registroAtivo) {
+            const novoRegistro: RegistroPermanencia = {
+              id: Date.now().toString(),
+              localId: local.id,
+              motoristaId: veiculo.id,
+              dataEntrada: new Date().toISOString(),
+              ativo: true
+            };
+            setRegistrosPermanencia(prev => [...prev, novoRegistro]);
+
+            if (local.alertaSom) {
+              reproduzirSomAlerta('entrada');
+            }
+            if (local.alertaVisual) {
+              if ('Notification' in window && Notification.permission === 'granted') {
+                new Notification(`${veiculo.placa} chegou em ${local.nome}`, {
+                  body: `Localização: ${local.cidade}, ${local.uf}`,
+                  icon: '📍'
+                });
+              }
+            }
+          } else if (!estaEmGeofence && registroAtivo) {
+            const tempoTotalMinutos = Math.floor(
+              (new Date().getTime() - new Date(registroAtivo.dataEntrada).getTime()) / 60000
+            );
+            
+            const novoHistorico: HistoricoVisita = {
+              id: Date.now().toString(),
+              localId: local.id,
+              motoristaId: veiculo.id,
+              dataEntrada: registroAtivo.dataEntrada,
+              dataSaida: new Date().toISOString(),
+              tempoTotalMinutos
+            };
+            
+            setHistorico(prev => {
+              const updated = [...prev, novoHistorico];
+              localStorage.setItem('historico_permanencia', JSON.stringify(updated));
+              return updated;
+            });
+
+            setRegistrosPermanencia(prev =>
+              prev.map(r => r.id === registroAtivo.id ? { ...r, ativo: false, dataSaida: new Date().toISOString(), tempoTotalMinutos } : r)
+            );
+
+            if (local.alertaSom) {
+              reproduzirSomAlerta('saida');
+            }
+          }
+        });
+      });
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [veiculos, locais, registrosPermanencia]);
+
+  // Filtro de veículos
+  const veiculosFiltrados = useMemo(() => {
+    return veiculos.filter(veiculo => {
+      if (filtros.statusRastreador !== 'todos') {
+        const status = veiculo.statusRastreador || 'offline';
+        if (status !== filtros.statusRastreador) return false;
       }
-      .custom-vehicle-icon {
-        transition: transform 0.2s;
-      }
-      .custom-vehicle-icon:hover {
-        transform: scale(1.05);
-      }
-    `;
-    document.head.appendChild(style);
-    return () => {
-      document.head.removeChild(style);
-    };
+      if (filtros.tipo !== 'todos' && veiculo.tipo !== filtros.tipo) return false;
+      if (filtros.placa && !veiculo.placa.toLowerCase().includes(filtros.placa.toLowerCase())) return false;
+      if (filtros.apenasComCarga && !cargasPorVeiculo[veiculo.id]) return false;
+      return true;
+    });
+  }, [veiculos, filtros, cargasPorVeiculo]);
+
+  const veiculosComLocalizacao = useMemo(() => {
+    return veiculosFiltrados.filter(v => 
+      v.coordenadas && 
+      typeof v.coordenadas.lat === 'number' && 
+      typeof v.coordenadas.lng === 'number' &&
+      !isNaN(v.coordenadas.lat) && 
+      !isNaN(v.coordenadas.lng) &&
+      v.coordenadas.lat !== 0 && 
+      v.coordenadas.lng !== 0
+    );
+  }, [veiculosFiltrados]);
+
+  const locaisFiltrados = useMemo(() => {
+    let filtrados = [...locais];
+    
+    if (filtrosLocais.busca) {
+      filtrados = filtrados.filter(local => 
+        local.nome.toLowerCase().includes(filtrosLocais.busca.toLowerCase()) ||
+        local.cidade.toLowerCase().includes(filtrosLocais.busca.toLowerCase())
+      );
+    }
+    
+    if (filtrosLocais.tipos.length > 0) {
+      filtrados = filtrados.filter(local => filtrosLocais.tipos.includes(local.tipo));
+    }
+    
+    if (filtrosLocais.apenasComVeiculos) {
+      filtrados = filtrados.filter(local => {
+        return veiculos.some(veiculo => veiculoEmGeofence(veiculo, local));
+      });
+    }
+    
+    return filtrados;
+  }, [locais, filtrosLocais, veiculos]);
+
+  // Centralizar mapa nos veículos
+  useEffect(() => {
+    if (veiculosComLocalizacao.length > 0 && !showCadastroLocal && !showListaLocais && !showHistorico && !showFilterPanel && !showFilterLocaisPanel) {
+      const somaLat = veiculosComLocalizacao.reduce((sum, v) => sum + v.coordenadas!.lat, 0);
+      const somaLng = veiculosComLocalizacao.reduce((sum, v) => sum + v.coordenadas!.lng, 0);
+      const centroLat = somaLat / veiculosComLocalizacao.length;
+      const centroLng = somaLng / veiculosComLocalizacao.length;
+      setCentroMapa([centroLat, centroLng]);
+    }
+  }, [veiculosComLocalizacao, showCadastroLocal, showListaLocais, showHistorico, showFilterPanel, showFilterLocaisPanel]);
+
+  const stats = useMemo(() => {
+    const total = veiculos.length;
+    const comLocalizacao = veiculosComLocalizacao.length;
+    const online = veiculos.filter(v => v.statusRastreador === 'online').length;
+    const offline = veiculos.filter(v => v.statusRastreador === 'offline').length;
+    const parado = veiculos.filter(v => v.statusRastreador === 'parado').length;
+    const filtrados = veiculosFiltrados.length;
+    return { total, comLocalizacao, online, offline, parado, filtrados };
+  }, [veiculos, veiculosComLocalizacao, veiculosFiltrados]);
+
+  useEffect(() => {
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
   }, []);
 
-  return (
+  // Legenda de ícones COLORIDA igual ao outro código
+  const LegendaPanel = () => (
     <div style={{
-      width: '100%',
-      height: 'calc(100vh - 60px)',
+      position: 'absolute',
+      bottom: 20,
+      left: 20,
+      zIndex: 1000,
+      backgroundColor: 'rgba(0,0,0,0.85)',
+      backdropFilter: 'blur(10px)',
+      borderRadius: 12,
+      border: '1px solid rgba(255,255,255,0.15)',
+      padding: '12px 16px',
+      minWidth: 260,
+      maxHeight: 400,
+      overflowY: 'auto'
+    }}>
+      <div style={{ fontSize: 12, fontWeight: 600, color: '#FFF', marginBottom: 8 }}>📖 Legenda</div>
+      
+      {/* Status do Rastreador */}
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: '#AAA', marginBottom: 6 }}>📡 Status do Rastreador:</div>
+        {Object.entries(STATUS_RASTREADOR_CONFIG).map(([key, config]) => (
+          <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+            <div style={{ width: 12, height: 12, borderRadius: '50%', backgroundColor: config.cor }} />
+            <span style={{ fontSize: 11, fontWeight: 500, color: config.cor }}>{config.label}</span>
+            <span style={{ fontSize: 9, color: '#666' }}>{config.legenda}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Status da Carga */}
+      <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: '#AAA', marginBottom: 6 }}>📦 Status da Carga:</div>
+        {Object.entries(STATUS_CARGA_CONFIG).map(([key, config]) => (
+          <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+            <span style={{ fontSize: 12 }}>{config.icon}</span>
+            <span style={{ fontSize: 11, fontWeight: 500, color: config.cor }}>{config.label}</span>
+            <span style={{ fontSize: 9, color: '#666' }}>{config.legenda}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Tipos de Local */}
+      <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: '#AAA', marginBottom: 6 }}>📍 Tipos de Local:</div>
+        {Object.entries(TIPOS_LOCAL_CONFIG).map(([key, config]) => (
+          <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+            <span style={{ fontSize: 12 }}>{config.icon}</span>
+            <span style={{ fontSize: 10, color: '#AAA' }}>{config.label}</span>
+            <span style={{ fontSize: 9, color: '#666', marginLeft: 'auto' }}>{config.cor}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Filtro ativo */}
+      {(filtrosLocais.tipos.length > 0 || filtrosLocais.busca || filtrosLocais.apenasComVeiculos) && (
+        <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+          <div style={{ fontSize: 10, color: '#FFD700' }}>
+            🔍 Filtro ativo: {locaisFiltrados.length}/{locais.length} locais
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <div style={{ 
+      width: '100%', 
+      height: 'calc(100vh - 60px)', 
       backgroundColor: '#000',
       position: 'relative',
       overflow: 'hidden'
@@ -895,27 +2114,84 @@ const VisaoMapaLV: React.FC<VisaoMapaProps> = ({
               <ArrowLeft size={16} /> Voltar
             </button>
           )}
-
+          
           <div>
             <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 800, color: '#FFF' }}>
-              🗺️ Visão Mapa - Veículos
+              🗺️ Visão em Mapa - Veículos
             </h2>
             <p style={{ margin: '4px 0 0 0', fontSize: '11px', color: '#AAA' }}>
-              Localização em tempo real com status do rastreador e informações da carga
+              Localização em tempo real + Geofences avançados
             </p>
           </div>
         </div>
-
+        
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-          <div style={{
-            backgroundColor: 'rgba(30,30,40,0.9)',
-            borderRadius: '12px',
+          <div style={{ 
+            backgroundColor: 'rgba(30,30,40,0.9)', 
+            borderRadius: '12px', 
             padding: '6px 12px',
             textAlign: 'center'
           }}>
-            <span style={{ fontSize: '18px', fontWeight: 700, color: '#22C55E' }}>{stats.online}</span>
+            <span style={{ fontSize: '18px', fontWeight: 700, color: '#22C55E' }}>{stats.comLocalizacao}</span>
             <span style={{ fontSize: '10px', color: '#AAA', marginLeft: '6px' }}>online</span>
           </div>
+
+          <button
+            onClick={() => { setLocalEditando(null); setShowCadastroLocal(true); }}
+            style={{
+              backgroundColor: '#3B82F6',
+              border: 'none',
+              borderRadius: '12px',
+              padding: '8px 16px',
+              color: '#FFF',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              fontSize: '13px',
+              fontWeight: 600
+            }}
+          >
+            <Plus size={16} /> Novo Local
+          </button>
+
+          <button
+            onClick={() => setShowListaLocais(!showListaLocais)}
+            style={{
+              backgroundColor: 'rgba(30,30,40,0.9)',
+              border: showListaLocais ? '1px solid #3B82F6' : '1px solid #444',
+              borderRadius: '12px',
+              padding: '8px 16px',
+              color: showListaLocais ? '#3B82F6' : '#FFF',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              fontSize: '13px',
+              fontWeight: 600
+            }}
+          >
+            <List size={16} /> Locais ({locais.length})
+          </button>
+
+          <button
+            onClick={() => setShowHistorico(!showHistorico)}
+            style={{
+              backgroundColor: 'rgba(30,30,40,0.9)',
+              border: showHistorico ? '1px solid #10B981' : '1px solid #444',
+              borderRadius: '12px',
+              padding: '8px 16px',
+              color: showHistorico ? '#10B981' : '#FFF',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              fontSize: '13px',
+              fontWeight: 600
+            }}
+          >
+            <History size={16} /> Histórico
+          </button>
 
           <button
             onClick={() => setShowFilterPanel(!showFilterPanel)}
@@ -933,7 +2209,57 @@ const VisaoMapaLV: React.FC<VisaoMapaProps> = ({
               fontWeight: 600
             }}
           >
-            <Filter size={16} /> Filtros
+            <Truck size={16} /> Veículos
+          </button>
+
+          <button
+            onClick={() => setShowFilterLocaisPanel(!showFilterLocaisPanel)}
+            style={{
+              backgroundColor: 'rgba(30,30,40,0.9)',
+              border: showFilterLocaisPanel ? '1px solid #EC4899' : '1px solid #444',
+              borderRadius: '12px',
+              padding: '8px 16px',
+              color: showFilterLocaisPanel ? '#EC4899' : '#FFF',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              fontSize: '13px',
+              fontWeight: 600
+            }}
+          >
+            <MapPin size={16} /> Locais
+            {(filtrosLocais.tipos.length > 0 || filtrosLocais.busca || filtrosLocais.apenasComVeiculos) && (
+              <span style={{
+                backgroundColor: '#EC4899',
+                color: '#FFF',
+                fontSize: '10px',
+                borderRadius: '10px',
+                padding: '2px 6px',
+                marginLeft: '4px'
+              }}>
+                {locaisFiltrados.length}/{locais.length}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setShowLegenda(!showLegenda)}
+            style={{
+              backgroundColor: 'rgba(30,30,40,0.9)',
+              border: showLegenda ? '1px solid #8B5CF6' : '1px solid #444',
+              borderRadius: '12px',
+              padding: '8px 16px',
+              color: showLegenda ? '#8B5CF6' : '#FFF',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              fontSize: '13px',
+              fontWeight: 600
+            }}
+          >
+            <Eye size={16} /> Legenda
           </button>
 
           {onRefresh && (
@@ -959,19 +2285,12 @@ const VisaoMapaLV: React.FC<VisaoMapaProps> = ({
         </div>
       </div>
 
-      {/* Stats Widget */}
       <StatsWidget stats={stats} />
-
-      {/* Zoom Controls */}
+      <QuickNavMenu locais={locaisFiltrados} onNavigateTo={handleNavigateTo} />
       <ZoomControls map={mapInstance} />
-
-      {/* Locate Button */}
       <LocateButton onLocate={handleLocateUser} />
+      {showLegenda && <LegendaPanel />}
 
-      {/* Legenda */}
-      <LegendaPanel />
-
-      {/* Mapa */}
       <MapContainer
         ref={(map) => {
           if (map) {
@@ -994,141 +2313,148 @@ const VisaoMapaLV: React.FC<VisaoMapaProps> = ({
         <TileLayer url="https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}" />
         <MapController center={centroMapa} zoom={mapaZoom} />
 
-        {/* Marcadores de veículos filtrados */}
-        {veiculosFiltrados.map(veiculo => {
+        {/* Marcadores de veículos - COM INFORMAÇÕES NÍTIDAS */}
+        {veiculosComLocalizacao.map(veiculo => {
           const carga = cargasPorVeiculo[veiculo.id];
-          const statusCarga = carga?.status || 'sem_carga';
-          const statusInfo = getStatusInfo(statusCarga);
-          const statusRastreador = veiculo.statusRastreador || 'offline';
-
+          const motoristaNome = carga?.motorista || veiculo.motoristaProgramado || veiculo.motoristaNome;
+          
           return (
             <Marker
               key={veiculo.id}
               position={[veiculo.coordenadas!.lat, veiculo.coordenadas!.lng]}
-              icon={createVehicleIcon(statusRastreador, veiculo.placa, veiculo.tipo, carga)}
+              icon={createVehicleIcon(
+                veiculo.statusRastreador || 'offline', 
+                veiculo.placa, 
+                veiculo.tipo,
+                carga,
+                motoristaNome
+              )}
             >
               <Popup>
-                <div style={{ fontSize: '12px', minWidth: '280px', maxWidth: '360px' }}>
-                  {/* Cabeçalho com status */}
+                <div style={{ fontSize: '13px', minWidth: '320px', maxWidth: '380px' }}>
+                  {/* Cabeçalho com placa e status */}
                   <div style={{
-                    fontWeight: 600,
+                    fontWeight: 700,
                     marginBottom: '12px',
-                    paddingBottom: '8px',
-                    borderBottom: `2px solid ${statusInfo.color}`,
+                    paddingBottom: '10px',
+                    borderBottom: `2px solid ${STATUS_RASTREADOR_CONFIG[veiculo.statusRastreador || 'offline']?.cor || '#6B7280'}`,
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '8px',
+                    gap: '10px',
                     flexWrap: 'wrap'
                   }}>
-                    <span style={{ fontSize: '16px' }}>{statusInfo.icon}</span>
-                    <span style={{ fontSize: '14px' }}>{veiculo.placa}</span>
+                    <span style={{ fontSize: '22px' }}>{getTipoVeiculoInfo(veiculo.tipo).icone}</span>
+                    <span style={{ fontSize: '16px', fontWeight: 800, color: '#FFF' }}>{veiculo.placa}</span>
                     <span style={{
                       fontSize: '10px',
-                      padding: '2px 8px',
-                      borderRadius: '12px',
-                      background: STATUS_CONFIG[statusRastreador]?.cor + '20' || '#333',
-                      color: STATUS_CONFIG[statusRastreador]?.cor || '#AAA'
+                      padding: '3px 10px',
+                      borderRadius: '20px',
+                      background: `${STATUS_RASTREADOR_CONFIG[veiculo.statusRastreador || 'offline']?.cor}20`,
+                      color: STATUS_RASTREADOR_CONFIG[veiculo.statusRastreador || 'offline']?.cor,
+                      fontWeight: 600
                     }}>
-                      {STATUS_CONFIG[statusRastreador]?.label || 'Offline'}
+                      {STATUS_RASTREADOR_CONFIG[veiculo.statusRastreador || 'offline']?.label}
                     </span>
-                    {carga && (
-                      <span style={{
-                        fontSize: '10px',
-                        padding: '2px 8px',
-                        borderRadius: '12px',
-                        background: statusInfo.bg,
-                        color: statusInfo.color
-                      }}>
-                        {statusInfo.label}
-                      </span>
-                    )}
                   </div>
 
-                  {/* Informações do veículo */}
-                  <div style={{ marginBottom: '12px' }}>
-                    <div><strong>🚛 Tipo:</strong> {getTipoNome(veiculo.tipo)}</div>
-                    {veiculo.capacidade && <div><strong>📦 Capacidade:</strong> {veiculo.capacidade} paletes</div>}
-                    {veiculo.ultimaMacro && (
-                      <div style={{ marginTop: '4px', color: '#FFD700' }}>🏷️ Macro: {veiculo.ultimaMacro}</div>
-                    )}
-                  </div>
-
-                  {/* Localização */}
-                  <div style={{
-                    marginBottom: '12px',
-                    padding: '8px',
-                    backgroundColor: '#1A1A1A',
-                    borderRadius: '8px'
-                  }}>
-                    <div><strong>📍 Localização:</strong> {veiculo.ultimaLocalizacao || veiculo.ultimoEndereco || '---'}</div>
-                    <div style={{ marginTop: '4px', fontSize: '10px', color: '#888' }}>
-                      🏎️ Velocidade: {veiculo.velocidade || 0} km/h
+                  {/* Informações do Veículo */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '12px' }}>
+                    <div>
+                      <div style={{ fontSize: '10px', color: '#888' }}>🚛 Tipo</div>
+                      <div style={{ fontSize: '12px', fontWeight: 500, color: '#FFF' }}>{getTipoVeiculoInfo(veiculo.tipo).label}</div>
                     </div>
-                    {veiculo.ultimaAtualizacaoRastreador && (
-                      <div style={{ fontSize: '10px', color: '#888', marginTop: '4px' }}>
-                        ⏱️ Última atualização: {new Date(veiculo.ultimaAtualizacaoRastreador.seconds * 1000).toLocaleString('pt-BR')}
+                    <div>
+                      <div style={{ fontSize: '10px', color: '#888' }}>🏎️ Velocidade</div>
+                      <div style={{ fontSize: '12px', fontWeight: 500, color: '#FFF' }}>{veiculo.velocidade || 0} km/h</div>
+                    </div>
+                    {veiculo.capacidade && (
+                      <div>
+                        <div style={{ fontSize: '10px', color: '#888' }}>📦 Capacidade</div>
+                        <div style={{ fontSize: '12px', fontWeight: 500, color: '#FFF' }}>{veiculo.capacidade} paletes</div>
                       </div>
                     )}
+                    <div>
+                      <div style={{ fontSize: '10px', color: '#888' }}>📍 Localização</div>
+                      <div style={{ fontSize: '11px', fontWeight: 500, color: '#AAA' }}>{veiculo.ultimaLocalizacao || veiculo.ultimoEndereco || '—'}</div>
+                    </div>
                   </div>
 
-                  {/* Informações da carga detalhada */}
-                  {carga && (
+                  {/* Motorista Programado - DESTAQUE NÍTIDO */}
+                  {motoristaNome && (
                     <div style={{
-                      marginTop: '12px',
-                      padding: '12px',
-                      backgroundColor: '#1A1A1A',
-                      borderRadius: '8px',
-                      borderLeft: `4px solid ${statusInfo.color}`
+                      marginBottom: '12px',
+                      padding: '10px',
+                      backgroundColor: '#FFD70020',
+                      borderRadius: '10px',
+                      borderLeft: `3px solid #FFD700`,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px'
                     }}>
-                      <div style={{ fontWeight: 'bold', marginBottom: '8px', color: statusInfo.color, fontSize: '13px' }}>
-                        {statusInfo.icon} CARGA ATUAL - {statusInfo.label}
+                      <span style={{ fontSize: '18px' }}>👨‍✈️</span>
+                      <div>
+                        <div style={{ fontSize: '10px', color: '#FFD700' }}>MOTORISTA PROGRAMADO</div>
+                        <div style={{ fontSize: '14px', fontWeight: 700, color: '#FFD700' }}>{motoristaNome}</div>
                       </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', marginBottom: '8px' }}>
-                        <div><strong>📦 DT:</strong> {carga.dt || '—'}</div>
-                        <div><strong>⚖️ Peso:</strong> {carga.peso || '—'} kg</div>
-                      </div>
-                      <div style={{ marginBottom: '6px' }}>
-                        <strong>📍 Coleta:</strong> {carga.coletaCidade} - {carga.coletaLocal}
-                      </div>
-                      <div style={{ marginBottom: '6px' }}>
-                        <strong>🎯 Entrega:</strong> {carga.entregaCidade} - {carga.entregaLocal}
-                      </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', marginBottom: '6px' }}>
-                        <div><strong>📅 Data Coleta:</strong> {new Date(carga.coletaData).toLocaleDateString('pt-BR')}</div>
-                        <div><strong>📅 Data Entrega:</strong> {new Date(carga.entregaData).toLocaleDateString('pt-BR')}</div>
-                      </div>
-                      <div style={{ 
-                        marginTop: '8px', 
-                        paddingTop: '6px', 
-                        borderTop: '1px solid #333',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px'
-                      }}>
-                        <span style={{ fontSize: '14px' }}>👨‍✈️</span>
-                        <div>
-                          <strong>Motorista Programado:</strong> {carga.motorista || '—'}
-                        </div>
-                      </div>
-                      {carga.carreta && (
-                        <div style={{ marginTop: '4px' }}>
-                          <strong>🔗 Carreta:</strong> {carga.carreta}
-                        </div>
-                      )}
                     </div>
                   )}
 
-                  {!carga && (
+                  {/* CARGA ATUAL - COMPLETA E NÍTIDA */}
+                  {carga ? (
                     <div style={{
                       marginTop: '8px',
                       padding: '12px',
                       backgroundColor: '#1A1A1A',
-                      borderRadius: '8px',
-                      color: '#888',
-                      textAlign: 'center'
+                      borderRadius: '12px',
+                      borderLeft: `4px solid ${getStatusCargaInfo(carga.status).cor}`
                     }}>
-                      <div style={{ fontSize: '20px', marginBottom: '4px' }}>⭕</div>
-                      <div>Sem carga programada no momento</div>
+                      <div style={{
+                        fontWeight: 700,
+                        marginBottom: '10px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        color: getStatusCargaInfo(carga.status).cor,
+                        fontSize: '12px'
+                      }}>
+                        <span>{getStatusCargaInfo(carga.status).icon}</span>
+                        <span>CARGA ATUAL - {getStatusCargaInfo(carga.status).label}</span>
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '10px' }}>
+                        <div>
+                          <div style={{ fontSize: '9px', color: '#666' }}>📦 DT</div>
+                          <div style={{ fontSize: '11px', color: '#FFF' }}>{carga.dt || '—'}</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: '9px', color: '#666' }}>⚖️ Peso</div>
+                          <div style={{ fontSize: '11px', color: '#FFF' }}>{carga.peso || '—'} kg</div>
+                        </div>
+                      </div>
+
+                      <div style={{ marginBottom: '8px' }}>
+                        <div style={{ fontSize: '9px', color: '#666' }}>📍 COLETA</div>
+                        <div style={{ fontSize: '11px', color: '#FFF' }}>{carga.coletaCidade} - {carga.coletaLocal}</div>
+                        <div style={{ fontSize: '10px', color: '#888' }}>📅 {new Date(carga.coletaData).toLocaleDateString('pt-BR')}</div>
+                      </div>
+
+                      <div>
+                        <div style={{ fontSize: '9px', color: '#666' }}>🎯 ENTREGA</div>
+                        <div style={{ fontSize: '11px', color: '#FFF' }}>{carga.entregaCidade} - {carga.entregaLocal}</div>
+                        <div style={{ fontSize: '10px', color: '#888' }}>📅 {new Date(carga.entregaData).toLocaleDateString('pt-BR')}</div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{
+                      marginTop: '8px',
+                      padding: '16px',
+                      backgroundColor: '#1A1A1A',
+                      borderRadius: '12px',
+                      textAlign: 'center',
+                      color: '#888'
+                    }}>
+                      <div style={{ fontSize: '24px', marginBottom: '6px' }}>⭕</div>
+                      <div style={{ fontSize: '12px' }}>Sem carga programada</div>
                       <div style={{ fontSize: '10px', marginTop: '4px' }}>Veículo disponível para nova atribuição</div>
                     </div>
                   )}
@@ -1137,9 +2463,88 @@ const VisaoMapaLV: React.FC<VisaoMapaProps> = ({
             </Marker>
           );
         })}
+
+        {/* Marcadores de locais FILTRADOS e cercas */}
+        {locaisFiltrados.map(local => (
+          <div key={local.id}>
+            <Marker
+              position={[local.coordenadas.lat, local.coordenadas.lng]}
+              icon={createLocalIcon(local.tipo)}
+            >
+              <Popup>
+                <div style={{ fontSize: '12px', minWidth: '200px' }}>
+                  <div style={{ fontWeight: 600, marginBottom: '8px' }}>
+                    {TIPOS_LOCAL_CONFIG[local.tipo].icon} {local.nome}
+                  </div>
+                  <div>Tipo: {TIPOS_LOCAL_CONFIG[local.tipo].label}</div>
+                  <div>Local: {local.cidade}, {local.uf}</div>
+                  {local.cerca.tipo === 'circulo' && (
+                    <div>Raio: {local.cerca.raio}m</div>
+                  )}
+                  {local.cerca.tipo === 'poligono' && (
+                    <div>Polígono: {local.cerca.pontos?.length} pontos</div>
+                  )}
+                </div>
+              </Popup>
+            </Marker>
+
+            {local.cerca.tipo === 'circulo' && local.cerca.raio && (
+              <Circle
+                center={[local.coordenadas.lat, local.coordenadas.lng]}
+                radius={local.cerca.raio}
+                pathOptions={{
+                  color: TIPOS_LOCAL_CONFIG[local.tipo].cor,
+                  fillColor: TIPOS_LOCAL_CONFIG[local.tipo].cor,
+                  fillOpacity: 0.08,
+                  weight: 2,
+                  dashArray: '5, 5'
+                }}
+              />
+            )}
+
+            {local.cerca.tipo === 'poligono' && local.cerca.pontos && local.cerca.pontos.length >= 3 && (
+              <Polygon
+                positions={local.cerca.pontos.map(p => [p.lat, p.lng])}
+                pathOptions={{
+                  color: TIPOS_LOCAL_CONFIG[local.tipo].cor,
+                  fillColor: TIPOS_LOCAL_CONFIG[local.tipo].cor,
+                  fillOpacity: 0.08,
+                  weight: 2,
+                  dashArray: '5, 5'
+                }}
+              />
+            )}
+          </div>
+        ))}
       </MapContainer>
 
-      {/* Painel de filtros */}
+      {/* Painéis laterais */}
+      {showCadastroLocal && (
+        <CadastroLocalPanel
+          local={localEditando}
+          onSalvar={handleSalvarLocal}
+          onCancelar={() => { setShowCadastroLocal(false); setLocalEditando(null); }}
+        />
+      )}
+
+      {showListaLocais && (
+        <ListaLocaisPanel
+          locais={locais}
+          onEditar={(local) => { setLocalEditando(local); setShowCadastroLocal(true); }}
+          onExcluir={handleExcluirLocal}
+          onClose={() => setShowListaLocais(false)}
+        />
+      )}
+
+      {showHistorico && (
+        <HistoricoPermanenciaPanel
+          historico={historico}
+          locais={locais}
+          veiculos={veiculos}
+          onClose={() => setShowHistorico(false)}
+        />
+      )}
+
       {showFilterPanel && (
         <FilterPanel
           filtros={filtros}
@@ -1149,30 +2554,18 @@ const VisaoMapaLV: React.FC<VisaoMapaProps> = ({
         />
       )}
 
-      {/* Indicador de veículos sem localização */}
-      {veiculosComLocalizacao.length === 0 && !loading && (
-        <div style={{
-          position: 'absolute',
-          top: '50%',
-          left: '50%',
-          transform: 'translate(-50%, -50%)',
-          backgroundColor: 'rgba(0,0,0,0.85)',
-          backdropFilter: 'blur(10px)',
-          padding: '20px 32px',
-          borderRadius: 20,
-          textAlign: 'center',
-          zIndex: 1000,
-          border: '1px solid #333'
-        }}>
-          <Truck size={48} style={{ marginBottom: 16, opacity: 0.5 }} />
-          <h3 style={{ color: '#FFF', marginBottom: 8 }}>Nenhum veículo com localização</h3>
-          <p style={{ color: '#888', fontSize: 13 }}>
-            Os veículos precisam ter coordenadas cadastradas para aparecer no mapa
-          </p>
-        </div>
+      {showFilterLocaisPanel && (
+        <FilterLocaisPanel
+          filtros={filtrosLocais}
+          onFilterChange={setFiltrosLocais}
+          onClose={() => setShowFilterLocaisPanel(false)}
+          totalLocais={locais.length}
+          filteredCount={locaisFiltrados.length}
+          locais={locais}
+          veiculos={veiculos}
+        />
       )}
 
-      {/* Loading Overlay */}
       {loading && (
         <div style={{
           position: 'absolute',
@@ -1195,12 +2588,11 @@ const VisaoMapaLV: React.FC<VisaoMapaProps> = ({
             gap: 12
           }}>
             <RefreshCw size={24} className="animate-spin" style={{ animation: 'spin 1s linear infinite' }} />
-            <span style={{ color: '#FFF' }}>Carregando mapa...</span>
+            <span style={{ color: '#FFF' }}>Carregando...</span>
           </div>
         </div>
       )}
 
-      {/* Estilos globais para animação */}
       <style>{`
         @keyframes spin {
           from { transform: rotate(0deg); }
