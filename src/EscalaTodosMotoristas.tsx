@@ -6,7 +6,7 @@ import {
 import { 
     ChevronLeft, ChevronRight, Calendar as CalendarIcon, 
     Search, Filter, Download, Save, RefreshCw, User,
-    BarChart3, Users, CalendarDays, AlertCircle, X, CheckCircle2
+    BarChart3, Users, CalendarDays, AlertCircle, X, CheckCircle2, Trash2
 } from 'lucide-react';
 
 interface Motorista {
@@ -36,6 +36,8 @@ const EscalaTodosMotoristas: React.FC = () => {
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [saving, setSaving] = useState(false);
+    const [clearing, setClearing] = useState(false);
+    const [showClearConfirm, setShowClearConfirm] = useState(false);
     
     // Estado para o modal de seleção
     const [selectedCell, setSelectedCell] = useState<{ motoristaId: string, motoristaNome: string, date: Date } | null>(null);
@@ -81,6 +83,69 @@ const EscalaTodosMotoristas: React.FC = () => {
 
         return () => unsubMotoristas();
     }, []);
+
+    // FUNÇÃO PARA LIMPAR TODOS OS DADOS DE ESCALA
+    const limparTodosDados = async () => {
+        setClearing(true);
+        let totalDeleted = 0;
+        let errors = 0;
+
+        try {
+            for (const motorista of motoristas) {
+                if (!motorista.id) continue;
+
+                try {
+                    // Busca todas as escalas do motorista
+                    const escalasRef = collection(db, "motoristas", motorista.id, "escalas_motoristas");
+                    const escalasSnapshot = await getDocs(escalasRef);
+                    
+                    if (escalasSnapshot.empty) continue;
+
+                    // Usa batch para excluir em lote
+                    const batch = writeBatch(db);
+                    let batchCount = 0;
+                    
+                    for (const escalaDoc of escalasSnapshot.docs) {
+                        batch.delete(escalaDoc.ref);
+                        batchCount++;
+                        totalDeleted++;
+
+                        // Executa batch a cada 500 operações
+                        if (batchCount >= 500) {
+                            await batch.commit();
+                            batchCount = 0;
+                        }
+                    }
+                    
+                    // Commit do último batch
+                    if (batchCount > 0) {
+                        await batch.commit();
+                    }
+                    
+                } catch (error) {
+                    console.error(`Erro ao limpar escalas do motorista ${motorista.nome}:`, error);
+                    errors++;
+                }
+            }
+
+            if (errors === 0) {
+                alert(`✅ ${totalDeleted} registro(s) de escala excluído(s) com sucesso!`);
+            } else {
+                alert(`⚠️ ${totalDeleted} registro(s) excluído(s) com ${errors} erro(s)`);
+            }
+            
+            setShowClearConfirm(false);
+            
+            // Limpa o estado local
+            setEscalas({});
+            
+        } catch (error) {
+            console.error('Erro ao limpar todos os dados:', error);
+            alert('❌ Erro ao limpar todos os dados');
+        } finally {
+            setClearing(false);
+        }
+    };
 
     // Cálculos para o Dashboard
     const stats = useMemo(() => {
@@ -325,6 +390,15 @@ const EscalaTodosMotoristas: React.FC = () => {
                         <RefreshCw size={18} className={saving ? 'animate-spin' : ''} />
                         {saving ? 'Processando...' : 'Auto-Preencher'}
                     </button>
+
+                    <button 
+                        onClick={() => setShowClearConfirm(true)} 
+                        style={clearAllBtn}
+                        disabled={clearing}
+                    >
+                        <Trash2 size={18} />
+                        {clearing ? 'Limpando...' : 'Limpar Todos os Dados'}
+                    </button>
                 </div>
             </div>
 
@@ -376,6 +450,51 @@ const EscalaTodosMotoristas: React.FC = () => {
                     </tbody>
                 </table>
             </div>
+
+            {/* Modal de Confirmação para Limpar Todos os Dados */}
+            {showClearConfirm && (
+                <div style={modalOverlay} onClick={() => setShowClearConfirm(false)}>
+                    <div style={{ ...modalContent, maxWidth: '450px' }} onClick={e => e.stopPropagation()}>
+                        <div style={modalHeader}>
+                            <div>
+                                <h3 style={{ ...modalTitle, color: '#EF4444' }}>⚠️ Atenção!</h3>
+                                <p style={modalSubtitle}>
+                                    Esta ação irá <strong style={{ color: '#EF4444' }}>EXCLUIR PERMANENTEMENTE</strong> TODOS os registros de escala de <strong>TODOS</strong> os motoristas.
+                                </p>
+                            </div>
+                            <button onClick={() => setShowClearConfirm(false)} style={closeBtn}><X size={20} /></button>
+                        </div>
+                        
+                        <div style={modalBody}>
+                            <p style={{ color: '#888', fontSize: '13px', marginBottom: '24px' }}>
+                                Isso inclui todos os dias marcados como Presente, Folga, Férias, Falta e Atestado. 
+                                Esta ação não pode ser desfeita.
+                            </p>
+                            <p style={{ color: '#FFD700', fontSize: '14px', marginBottom: '24px', textAlign: 'center' }}>
+                                Deseja realmente continuar?
+                            </p>
+                            
+                            <div style={clearConfirmButtons}>
+                                <button 
+                                    onClick={() => setShowClearConfirm(false)} 
+                                    style={cancelClearBtn}
+                                    disabled={clearing}
+                                >
+                                    Cancelar
+                                </button>
+                                <button 
+                                    onClick={limparTodosDados} 
+                                    style={confirmClearBtn}
+                                    disabled={clearing}
+                                >
+                                    <Trash2 size={16} />
+                                    {clearing ? 'Limpando...' : 'Sim, Limpar Todos os Dados'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Modal de Seleção de Status */}
             {selectedCell && (
@@ -516,7 +635,8 @@ const subtitleStyle: React.CSSProperties = {
 const actionSection: React.CSSProperties = {
     display: 'flex',
     alignItems: 'center',
-    gap: '16px'
+    gap: '16px',
+    flexWrap: 'wrap'
 };
 
 const searchWrapper: React.CSSProperties = {
@@ -578,6 +698,21 @@ const autoFillBtn: React.CSSProperties = {
     gap: '8px',
     backgroundColor: '#FFD700',
     color: '#000',
+    border: 'none',
+    borderRadius: '8px',
+    padding: '10px 16px',
+    fontSize: '14px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    transition: 'transform 0.2s'
+};
+
+const clearAllBtn: React.CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    backgroundColor: '#DC2626',
+    color: '#FFF',
     border: 'none',
     borderRadius: '8px',
     padding: '10px 16px',
@@ -712,7 +847,8 @@ const legendStyle: React.CSSProperties = {
     padding: '16px',
     backgroundColor: '#111',
     borderRadius: '12px',
-    border: '1px solid #222'
+    border: '1px solid #222',
+    flexWrap: 'wrap'
 };
 
 const legendItem: React.CSSProperties = {
@@ -768,7 +904,11 @@ const modalHeader: React.CSSProperties = {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: '24px'
+    marginBottom: '16px'
+};
+
+const modalBody: React.CSSProperties = {
+    marginTop: '16px'
 };
 
 const modalTitle: React.CSSProperties = {
@@ -808,6 +948,43 @@ const statusOptionBtn: React.CSSProperties = {
     cursor: 'pointer',
     transition: 'all 0.2s',
     width: '100%'
+};
+
+const clearConfirmButtons: React.CSSProperties = {
+    display: 'flex',
+    gap: '12px',
+    justifyContent: 'center',
+    marginTop: '8px'
+};
+
+const cancelClearBtn: React.CSSProperties = {
+    backgroundColor: '#1A1A1A',
+    color: '#AAA',
+    border: '1px solid #333',
+    borderRadius: '12px',
+    padding: '12px 24px',
+    fontSize: '14px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+    flex: 1
+};
+
+const confirmClearBtn: React.CSSProperties = {
+    backgroundColor: '#DC2626',
+    color: '#FFF',
+    border: 'none',
+    borderRadius: '12px',
+    padding: '12px 24px',
+    fontSize: '14px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    justifyContent: 'center',
+    transition: 'all 0.2s',
+    flex: 1
 };
 
 export default EscalaTodosMotoristas;

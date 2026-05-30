@@ -16,7 +16,25 @@ const CONFIG = {
   url: 'http://181.191.209.100:9090/gestor/',
   user: 'operacao',
   password: '2025',
-  headless: process.env.HEADLESS === 'true'
+  headless: "new", // Alterado para o novo modo headless
+  // Configurações adicionais para melhor performance em background
+  args: [
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage',
+    '--disable-accelerated-2d-canvas',
+    '--disable-gpu',
+    '--window-size=1366,768',
+    '--disable-software-rasterizer',
+    '--disable-extensions',
+    '--disable-background-networking',
+    '--disable-default-apps',
+    '--disable-sync',
+    '--disable-translate',
+    '--hide-scrollbars',
+    '--mute-audio',
+    '--no-first-run'
+  ]
 };
 
 function converterPlaca(placa) {
@@ -29,23 +47,50 @@ function converterPlaca(placa) {
 }
 
 async function capturarLocalizacoes() {
-  console.log('\n🚀 INICIANDO CAPTURA SIGHRA\n');
+  const timestamp = new Date().toISOString();
+  console.log(`\n🚀 [${timestamp}] INICIANDO CAPTURA SIGHRA (Background mode - New Headless)`);
   
   let browser = null;
   
   try {
+    // Lançar navegador em modo headless novo (sem interface gráfica)
     browser = await puppeteer.launch({
-      headless: CONFIG.headless === 'true' ? 'new' : false,
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--start-maximized']
+      headless: CONFIG.headless, // "new" para o novo modo headless
+      args: CONFIG.args,
+      ignoreHTTPSErrors: true,
+      timeout: 60000
     });
     
+    console.log('✅ Navegador iniciado em modo headless (Chrome new headless mode)');
+    
     const page = await browser.newPage();
-    await page.setViewport({ width: 1366, height: 768 });
+    
+    // Reduzir o tamanho da viewport para melhor performance
+    await page.setViewport({ width: 1024, height: 768 });
+    
+    // Configurar timeouts
+    page.setDefaultTimeout(30000);
+    page.setDefaultNavigationTimeout(30000);
+    
+    // Desabilitar recursos não necessários para melhor performance
+    await page.setRequestInterception(true);
+    page.on('request', (request) => {
+      // Bloquear recursos desnecessários (imagens, fontes, etc)
+      const resourceType = request.resourceType();
+      if (resourceType === 'image' || resourceType === 'font' || resourceType === 'media') {
+        request.abort();
+      } else {
+        request.continue();
+      }
+    });
     
     // 1. LOGIN
     console.log('📝 Fazendo login...');
-    await page.goto(CONFIG.url, { waitUntil: 'networkidle2', timeout: 30000 });
-    await delay(3000);
+    await page.goto(CONFIG.url, { 
+      waitUntil: 'domcontentloaded',
+      timeout: 30000 
+    });
+    await delay(2000);
     
     const inputs = await page.$$('input');
     let campoUsuario = null;
@@ -75,7 +120,7 @@ async function capturarLocalizacoes() {
       await botoes[0].click();
     }
     
-    await delay(5000);
+    await delay(4000);
     console.log('✅ Login OK');
     
     // 2. CLICAR EM "GERAL"
@@ -92,20 +137,6 @@ async function capturarLocalizacoes() {
     
     if (!clicou) {
       clicou = await page.evaluate(() => {
-        const geralItem = document.querySelector('li.feed-item');
-        if (geralItem) {
-          const link = geralItem.querySelector('a');
-          if (link) {
-            link.click();
-            return true;
-          }
-        }
-        return false;
-      });
-    }
-    
-    if (!clicou) {
-      clicou = await page.evaluate(() => {
         const elementos = Array.from(document.querySelectorAll('a, button'));
         const geral = elementos.find(el => el.innerText?.trim() === 'Geral');
         if (geral) {
@@ -118,12 +149,13 @@ async function capturarLocalizacoes() {
     
     if (clicou) {
       console.log('✅ Clicou em "Geral"');
-      await delay(3000);
+      await delay(2000);
+    } else {
+      console.log('⚠️ Não conseguiu clicar em "Geral"');
     }
     
     // 3. CLICAR EM "RASTREAMENTO"
     console.log('📊 Procurando "Rastreamento"...');
-    await delay(2000);
     
     const clicouRast = await page.evaluate(() => {
       const elementos = Array.from(document.querySelectorAll('a, button'));
@@ -139,20 +171,22 @@ async function capturarLocalizacoes() {
     
     if (clicouRast) {
       console.log('✅ Clicou em "Rastreamento"');
-      await delay(5000);
+      await delay(4000);
+    } else {
+      console.log('⚠️ Não conseguiu clicar em "Rastreamento"');
     }
     
     // 4. AGUARDAR TABELA CARREGAR
     console.log('📊 Aguardando tabela carregar...');
     
     try {
-      await page.waitForSelector('#mainForm\\:tablePosicoes tbody tr', { timeout: 30000 });
+      await page.waitForSelector('#mainForm\\:tablePosicoes tbody tr', { timeout: 20000 });
       console.log('✅ Tabela carregou!');
     } catch (error) {
-      console.log('⚠️ Timeout aguardando tabela');
+      console.log('⚠️ Timeout aguardando tabela, tentando continuar...');
     }
     
-    await delay(3000);
+    await delay(2000);
     
     // 5. EXTRAIR DADOS
     console.log('📊 Extraindo dados dos veículos...');
@@ -171,8 +205,19 @@ async function capturarLocalizacoes() {
       for (const row of rows) {
         const cells = row.querySelectorAll('td');
         
-        if (cells.length >= 18) {
+        if (cells.length >= 15) {
           const placa = cells[2]?.innerText?.trim() || '';
+          
+          let motorista = cells[13]?.innerText?.trim() || '';
+          
+          if (motorista) {
+            motorista = motorista.replace(/\s+/g, ' ').trim();
+            if (motorista === '' || motorista === '-' || motorista === '---') {
+              motorista = 'Não informado';
+            }
+          } else {
+            motorista = 'Não informado';
+          }
           
           let latitudeRaw = cells[5]?.innerText?.trim() || '';
           let latitude = latitudeRaw ? parseFloat(latitudeRaw.replace(',', '.')) : null;
@@ -195,43 +240,22 @@ async function capturarLocalizacoes() {
             
             if (ignicaoHtml) {
               if (ignicaoHtml.includes('green') || 
-                  ignicaoHtml.includes('success') ||
                   ignicaoHtml.includes('verde') ||
-                  ignicaoHtml.includes('ligado') ||
-                  ignicaoHtml.includes('online') ||
-                  (ignicaoHtml.toLowerCase().includes('verde') && ignicaoHtml.toLowerCase().includes('chave')) ||
-                  ignicaoHtml.includes('color:green') ||
-                  ignicaoHtml.includes('color:#0f0') ||
-                  ignicaoHtml.includes('color:#00ff00')) {
+                  ignicaoHtml.includes('ligado')) {
                 ignicao = 'LIGADO';
               } 
               else if (ignicaoHtml.includes('red') || 
-                       ignicaoHtml.includes('danger') ||
                        ignicaoHtml.includes('vermelho') ||
-                       ignicaoHtml.includes('desligado') ||
-                       ignicaoHtml.includes('offline') ||
-                       (ignicaoHtml.toLowerCase().includes('vermelho') && ignicaoHtml.toLowerCase().includes('chave')) ||
-                       ignicaoHtml.includes('color:red') ||
-                       ignicaoHtml.includes('color:#f00') ||
-                       ignicaoHtml.includes('color:#ff0000')) {
+                       ignicaoHtml.includes('desligado')) {
                 ignicao = 'DESLIGADO';
-              }
-              
-              const imgMatch = ignicaoHtml.match(/src="[^"]*(verde|vermelho|green|red)[^"]*"/i);
-              if (imgMatch) {
-                if (imgMatch[1].toLowerCase().includes('verde') || imgMatch[1].toLowerCase().includes('green')) {
-                  ignicao = 'LIGADO';
-                } else if (imgMatch[1].toLowerCase().includes('vermelho') || imgMatch[1].toLowerCase().includes('red')) {
-                  ignicao = 'DESLIGADO';
-                }
               }
             }
             
             if (ignicao === 'DESCONHECIDO' && ignicaoTexto) {
               const textoLower = ignicaoTexto.toLowerCase();
-              if (textoLower.includes('ligado') || textoLower.includes('on') || textoLower.includes('ativo') || textoLower.includes('verde')) {
+              if (textoLower.includes('ligado') || textoLower.includes('on')) {
                 ignicao = 'LIGADO';
-              } else if (textoLower.includes('desligado') || textoLower.includes('off') || textoLower.includes('inativo') || textoLower.includes('vermelho')) {
+              } else if (textoLower.includes('desligado') || textoLower.includes('off')) {
                 ignicao = 'DESLIGADO';
               }
             }
@@ -258,6 +282,7 @@ async function capturarLocalizacoes() {
           if (placa && placa.length >= 7) {
             resultados.push({
               placa: placa,
+              motorista: motorista,
               latitude: latitude,
               longitude: longitude,
               velocidade: velocidade,
@@ -281,13 +306,14 @@ async function capturarLocalizacoes() {
       return;
     }
     
-    console.log('\n📋 Dados extraídos (primeiros 5):');
-    veiculos.slice(0, 5).forEach(v => {
+    // Log resumido para modo background
+    console.log(`\n📋 Amostra dos dados (primeiros 3):`);
+    veiculos.slice(0, 3).forEach(v => {
       const statusIcon = v.ignicao === 'LIGADO' ? '🟢' : (v.ignicao === 'DESLIGADO' ? '🔴' : '⚪');
-      console.log(`   ${v.placa} | Vel: ${v.velocidade} km/h | ${statusIcon} Ignição: ${v.ignicao}`);
-      console.log(`        📍 Localização: ${v.localizacao}`);
-      console.log(`        🗺️ Coord: ${v.latitude}, ${v.longitude}`);
-      if (v.macro) console.log(`        🏷️ Macro: ${v.macro}`);
+      console.log(`   ${v.placa} | Motorista: ${v.motorista} | Vel: ${v.velocidade} km/h | ${statusIcon}`);
+      if (v.localizacao && v.localizacao !== 'Localização não disponível') {
+        console.log(`        📍 ${v.localizacao.substring(0, 60)}`);
+      }
     });
     
     console.log('\n📝 Atualizando Firebase...');
@@ -326,6 +352,8 @@ async function capturarLocalizacoes() {
             velocidade: veiculo.velocidade,
             ignicao: veiculo.ignicao,
             ultimaMacro: veiculo.macro,
+            motorista: veiculo.motorista,
+            ultimoMotorista: veiculo.motorista,
             ultimaAtualizacaoRastreador: admin.firestore.Timestamp.now(),
             statusRastreador: 'online',
             fonte: 'SIGHRA',
@@ -335,14 +363,11 @@ async function capturarLocalizacoes() {
           };
           
           await doc.ref.update(dadosAtualizacao);
-          
           atualizados++;
-          const statusIcon = veiculo.ignicao === 'LIGADO' ? '🟢' : (veiculo.ignicao === 'DESLIGADO' ? '🔴' : '⚪');
-          console.log(`✅ ${veiculo.placa} | Vel: ${veiculo.velocidade}km/h | ${statusIcon} ${veiculo.ignicao} | 📍 ${veiculo.localizacao.substring(0, 40)}`);
         } else {
           naoEncontrados++;
-          if (naoEncontrados < 10) {
-            console.log(`⚠️ ${veiculo.placa} : Não cadastrado no Firebase`);
+          if (naoEncontrados <= 5) { // Limitar logs de não encontrados
+            console.log(`⚠️ ${veiculo.placa} não cadastrado no Firebase`);
           }
         }
       } catch (error) {
@@ -350,23 +375,32 @@ async function capturarLocalizacoes() {
       }
     }
     
+    if (naoEncontrados > 5) {
+      console.log(`   ... e mais ${naoEncontrados - 5} veículos não cadastrados`);
+    }
+    
     console.log(`\n📈 RESUMO:`);
     console.log(`   ✅ Atualizados: ${atualizados}`);
     console.log(`   ⚠️ Não cadastrados: ${naoEncontrados}`);
-    console.log(`   📊 Total de veículos no SIGHRA: ${veiculos.length}`);
+    console.log(`   📊 Total no SIGHRA: ${veiculos.length}`);
+    console.log(`   ⏱️ Duração: ${((Date.now() - new Date(timestamp).getTime()) / 1000).toFixed(2)}s`);
     
   } catch (error) {
     console.error('❌ ERRO:', error.message);
     if (browser) {
-      const pages = await browser.pages();
-      if (pages.length > 0) {
-        await pages[0].screenshot({ path: './erro-screenshot.png' });
-        console.log('📸 Screenshot do erro salvo: erro-screenshot.png');
+      try {
+        const pages = await browser.pages();
+        if (pages.length > 0) {
+          await pages[0].screenshot({ path: './erro-screenshot.png' });
+          console.log('📸 Screenshot do erro salvo: erro-screenshot.png');
+        }
+      } catch (e) {
+        console.log('Não foi possível salvar screenshot');
       }
     }
   } finally {
     if (browser) await browser.close();
-    console.log('\n🏁 Finalizado\n');
+    console.log(`🏁 [${new Date().toISOString()}] Finalizado\n`);
   }
 }
 
@@ -376,21 +410,34 @@ const INTERVALO_MS = INTERVALO_MINUTOS * 60 * 1000;
 
 async function executarLoop() {
   console.log(`\n${'='.repeat(60)}`);
-  console.log(`🕒 ROBÔ SIGHRA INICIADO`);
+  console.log(`🕒 ROBÔ SIGHRA EM BACKGROUND`);
   console.log(`📆 Intervalo configurado: ${INTERVALO_MINUTOS} minutos`);
-  console.log(`🤖 Modo headless: ${process.env.HEADLESS === 'true' ? 'SIM' : 'NÃO'}`);
-  console.log(`⏰ Próxima execução a cada ${INTERVALO_MINUTOS} minutos`);
+  console.log(`🤖 Modo headless: NOVO MODO (headless: "new")`);
+  console.log(`💾 Memória: Modo otimizado para background`);
+  console.log(`🌐 Chrome: Usando nova engine headless`);
+  console.log(`⏰ Executando a cada ${INTERVALO_MINUTOS} minutos`);
   console.log(`${'='.repeat(60)}\n`);
   
-  // Executa primeira vez imediatamente
+  // Executar primeira captura
   await capturarLocalizacoes();
   
-  // Agenda as próximas execuções
+  // Configurar intervalo para execuções subsequentes
   setInterval(async () => {
-    console.log(`\n🔄 Executando nova coleta (intervalo de ${INTERVALO_MINUTOS} min)...`);
+    console.log(`\n🔄 Executando coleta agendada (${INTERVALO_MINUTOS} min)...`);
     await capturarLocalizacoes();
   }, INTERVALO_MS);
 }
 
-// Iniciar o loop
+// Tratamento para fechamento graceful
+process.on('SIGINT', () => {
+  console.log('\n\n🛑 Recebido sinal de interrupção. Encerrando robô...');
+  process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+  console.log('\n\n🛑 Recebido sinal de término. Encerrando robô...');
+  process.exit(0);
+});
+
+// Iniciar o robô
 executarLoop().catch(console.error);

@@ -1,4 +1,4 @@
-// ListaVeiculos.tsx (VERSÃO MELHORADA - COM MELHOR GESTÃO E UX)
+// ListaVeiculos.tsx (VERSÃO COMPLETA COM ROTA MONISAT)
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { db } from './firebase';
@@ -16,7 +16,7 @@ import {
 } from 'firebase/firestore';
 import MapaModal from './ListaVeiculosMapaModal';
 import VisaoMapaLV from './VisaoMapaLV';
-import { BarChart3, MapPin } from 'lucide-react';
+import { MapPin } from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
 
 // ============ TIPOS E INTERFACES ============
@@ -53,6 +53,15 @@ interface Veiculo {
     lat: number;
     lng: number;
   };
+  // CAMPOS DO RASTREADOR
+  motorista?: string;
+  ultimoMotorista?: string;
+  ignicao?: string;
+  ultimaConsulta?: string;
+  fonte?: string;
+  // ROTA MONISAT
+  rotaMonisat?: string;
+  ultimaAtualizacaoRotaMonisat?: Timestamp;
 }
 
 interface MotivoIndisponibilidade {
@@ -97,6 +106,62 @@ const STATUS_CARGA = {
   seguindo_para_entrega: { label: 'EM ROTA', color: '#22C55E', bg: '#22C55E20', icon: '🚛' },
   chegou_entrega: { label: 'CHEGOU NA ENTREGA', color: '#3B82F6', bg: '#3B82F620', icon: '📍' }
 } as const;
+
+// ============ FUNÇÕES AUXILIARES ============
+
+/**
+ * Formata a rota Monisat para exibição
+ */
+const formatarRotaMonisat = (rota: string | undefined) => {
+  if (!rota) return null;
+  
+  try {
+    // Extrair o nome da rota (tudo antes do primeiro " -")
+    const partes = rota.split(' -');
+    const nomeRota = partes[0] || '';
+    
+    // Extrair coordenadas no formato > LAT> LNG>
+    const coordMatch = rota.match(/>\s*([-\d.]+)>\s*([-\d.]+)>/);
+    let coordenadaRota = '';
+    let lat = null;
+    let lng = null;
+    
+    if (coordMatch && coordMatch[1] && coordMatch[2]) {
+      lat = parseFloat(coordMatch[1]).toFixed(6);
+      lng = parseFloat(coordMatch[2]).toFixed(6);
+      coordenadaRota = `${lat}, ${lng}`;
+    }
+    
+    // Extrair data
+    const dataMatch = rota.match(/>\s*(\d{2})-(\d{4})>/);
+    let dataRota = '';
+    if (dataMatch) {
+      const mes = dataMatch[1];
+      const ano = dataMatch[2];
+      dataRota = `${mes}/${ano}`;
+    }
+    
+    // Extrair horário se houver
+    const horaMatch = rota.match(/(\d{2}:\d{2})/);
+    let horarioRota = '';
+    if (horaMatch) {
+      horarioRota = horaMatch[1];
+    }
+    
+    return { 
+      nomeRota, 
+      coordenadaRota, 
+      dataRota, 
+      horarioRota,
+      lat,
+      lng,
+      rotaCompleta: rota 
+    };
+  } catch (error) {
+    console.error('Erro ao formatar rota:', error);
+    return { nomeRota: rota, coordenadaRota: '', dataRota: '', horarioRota: '', lat: null, lng: null, rotaCompleta: rota };
+  }
+};
 
 // ============ COMPONENTES AUXILIARES ============
 
@@ -151,7 +216,7 @@ const Filtros: React.FC<FiltrosProps> = ({
     <div style={{ display: 'flex', gap: '12px', marginBottom: '30px', flexWrap: 'wrap' }}>
       <input
         type="text"
-        placeholder="🔍 Buscar por placa..."
+        placeholder="🔍 Buscar por placa ou motorista..."
         value={searchTerm}
         onChange={(e) => onSearchChange(e.target.value)}
         style={{
@@ -662,7 +727,7 @@ const ModalConfirmacao: React.FC<ModalConfirmacaoProps> = ({
 };
 
 /**
- * Componente Card de Veículo
+ * Componente Card de Veículo (COM ROTA MONISAT)
  */
 interface CardVeiculoProps {
   veiculo: Veiculo;
@@ -689,13 +754,18 @@ const CardVeiculo: React.FC<CardVeiculoProps> = ({
   const motivoInfo = motivo ? MOTIVOS_INDISPONIBILIDADE[motivo.motivo] : null;
   const statusInfo = carga ? STATUS_CARGA[carga.status as keyof typeof STATUS_CARGA] : null;
 
-  const borderColor = temProgramacao 
-    ? '#22C55E' 
-    : (motivo ? motivoInfo?.color : '#1A1A1A');
-  
   const headerBg = temProgramacao 
     ? '#22C55E' 
     : (motivo ? motivoInfo?.color : '#4facfe');
+
+  // Função para formatar a data/hora da última atualização
+  const formatarUltimaAtualizacao = () => {
+    if (!veiculo.ultimaAtualizacaoRastreador) return '--:--';
+    return new Date(veiculo.ultimaAtualizacaoRastreador.seconds * 1000).toLocaleTimeString('pt-PT');
+  };
+
+  // Formatar rota Monisat
+  const rotaFormatada = formatarRotaMonisat(veiculo.rotaMonisat);
 
   return (
     <div style={{
@@ -791,6 +861,124 @@ const CardVeiculo: React.FC<CardVeiculoProps> = ({
           </div>
         )}
 
+        {/* ROTA MONISAT */}
+        {veiculo.rotaMonisat && rotaFormatada && (
+          <div style={{
+            marginBottom: '16px',
+            padding: '12px',
+            background: '#1A1A1A',
+            borderRadius: '10px',
+            borderLeft: '4px solid #8B5CF6'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+              <span style={{ fontSize: '14px' }}>🗺️</span>
+              <span style={{ fontSize: '11px', color: '#8B5CF6', fontWeight: 'bold' }}>
+                ROTA MONISAT
+              </span>
+              {veiculo.ultimaAtualizacaoRotaMonisat && (
+                <span style={{ 
+                  fontSize: '9px', 
+                  color: '#555', 
+                  marginLeft: 'auto'
+                }}>
+                  ⏱️ {new Date(veiculo.ultimaAtualizacaoRotaMonisat.seconds * 1000).toLocaleTimeString('pt-PT')}
+                </span>
+              )}
+            </div>
+            
+            <div style={{ 
+              fontSize: '12px', 
+              fontWeight: 'bold', 
+              color: '#8B5CF6',
+              marginBottom: '6px',
+              wordBreak: 'break-word'
+            }}>
+              📍 {rotaFormatada.nomeRota}
+            </div>
+            
+            {rotaFormatada.coordenadaRota && (
+              <div style={{ 
+                fontSize: '11px', 
+                color: '#AAA', 
+                marginBottom: '4px',
+                fontFamily: 'monospace'
+              }}>
+                🗺️ {rotaFormatada.coordenadaRota}
+              </div>
+            )}
+            
+            <div style={{ display: 'flex', gap: '12px', marginTop: '6px' }}>
+              {rotaFormatada.dataRota && (
+                <div style={{ fontSize: '10px', color: '#888' }}>
+                  📅 {rotaFormatada.dataRota}
+                </div>
+              )}
+              {rotaFormatada.horarioRota && (
+                <div style={{ fontSize: '10px', color: '#888' }}>
+                  🕐 {rotaFormatada.horarioRota}
+                </div>
+              )}
+            </div>
+
+            {/* Botão para ver rota no mapa */}
+            {rotaFormatada.lat && rotaFormatada.lng && (
+              <button
+                onClick={() => {
+                  // Abrir Google Maps com as coordenadas da rota
+                  window.open(`https://www.google.com/maps?q=${rotaFormatada.lat},${rotaFormatada.lng}`, '_blank');
+                }}
+                style={{
+                  marginTop: '8px',
+                  padding: '6px 12px',
+                  background: '#8B5CF6',
+                  color: '#FFF',
+                  border: 'none',
+                  borderRadius: '8px',
+                  fontSize: '11px',
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                  transition: 'opacity 0.2s',
+                  width: '100%'
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.opacity = '0.8'}
+                onMouseLeave={(e) => e.currentTarget.style.opacity = '1'}
+              >
+                🗺️ Ver Rota no Mapa
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Motorista Logado no Rastreador */}
+        {(veiculo.motorista || veiculo.ultimoMotorista) && (
+          <div style={{
+            marginBottom: '16px',
+            padding: '12px',
+            background: '#1A1A1A',
+            borderRadius: '10px',
+            borderLeft: `4px solid ${veiculo.ignicao === 'LIGADO' ? '#22C55E' : '#FF9500'}`
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+              <span style={{ fontSize: '14px' }}>👨‍✈️</span>
+              <span style={{ fontSize: '11px', color: '#4facfe', fontWeight: 'bold' }}>
+                MOTORISTA LOGADO (RASTREADOR)
+              </span>
+            </div>
+            <div style={{ fontSize: '15px', fontWeight: 'bold', color: '#FFF', marginBottom: '4px' }}>
+              {veiculo.motorista || veiculo.ultimoMotorista || 'Não informado'}
+            </div>
+            {veiculo.ignicao && (
+              <div style={{ 
+                fontSize: '11px', 
+                color: veiculo.ignicao === 'LIGADO' ? '#22C55E' : '#EF4444',
+                marginTop: '4px'
+              }}>
+                🔑 Ignição: {veiculo.ignicao === 'LIGADO' ? '🟢 LIGADO' : '🔴 DESLIGADO'}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Rastreamento */}
         {(veiculo.ultimaLocalizacao || veiculo.ultimaAtualizacaoRastreador) && (
           <div style={{
@@ -836,14 +1024,18 @@ const CardVeiculo: React.FC<CardVeiculoProps> = ({
             
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#888' }}>
               <div>
-                ⏱️ {veiculo.ultimaAtualizacaoRastreador
-                  ? new Date(veiculo.ultimaAtualizacaoRastreador.seconds * 1000).toLocaleTimeString('pt-PT')
-                  : '--:--'}
+                ⏱️ {formatarUltimaAtualizacao()}
               </div>
               <div style={{ color: veiculo.velocidade && veiculo.velocidade > 0 ? '#22C55E' : '#888' }}>
                 🏎️ {veiculo.velocidade || 0} km/h
               </div>
             </div>
+            
+            {veiculo.fonte && (
+              <div style={{ fontSize: '9px', color: '#555', marginTop: '6px', textAlign: 'right' }}>
+                Fonte: {veiculo.fonte}
+              </div>
+            )}
           </div>
         )}
 
@@ -921,7 +1113,7 @@ const CardVeiculo: React.FC<CardVeiculoProps> = ({
             </div>
 
             <div style={{ fontSize: '13px', marginBottom: '8px', color: '#FFF' }}>
-              <strong>👨‍✈️ Motorista:</strong> {carga.motorista || '—'}
+              <strong>👨‍✈️ Motorista Programado:</strong> {carga.motorista || '—'}
             </div>
             
             <div style={{ fontSize: '13px', marginBottom: '8px', color: '#FFF' }}>
@@ -931,6 +1123,20 @@ const CardVeiculo: React.FC<CardVeiculoProps> = ({
             {carga.carreta && (
               <div style={{ fontSize: '13px', color: '#FFF' }}>
                 <strong>🔗 Carreta:</strong> {carga.carreta}
+              </div>
+            )}
+
+            {/* Comparação de Motoristas */}
+            {carga.motorista && veiculo.motorista && carga.motorista !== veiculo.motorista && (
+              <div style={{
+                marginTop: '10px',
+                padding: '8px',
+                background: '#FFD70020',
+                borderRadius: '8px',
+                fontSize: '11px',
+                color: '#FFD700'
+              }}>
+                ⚠️ Motorista do rastreador ({veiculo.motorista}) difere do programado ({carga.motorista})
               </div>
             )}
           </div>
@@ -997,16 +1203,6 @@ const CardVeiculo: React.FC<CardVeiculoProps> = ({
             transition: 'opacity 0.2s'
           }}
           title={!veiculo.coordenadas?.lat || !veiculo.coordenadas?.lng ? 'Coordenadas não disponíveis' : 'Ver no mapa'}
-          onMouseEnter={(e) => {
-            if (veiculo.coordenadas?.lat && veiculo.coordenadas?.lng) {
-              e.currentTarget.style.opacity = '0.8';
-            }
-          }}
-          onMouseLeave={(e) => {
-            if (veiculo.coordenadas?.lat && veiculo.coordenadas?.lng) {
-              e.currentTarget.style.opacity = '1';
-            }
-          }}
         >
           🗺️ Ver Localização
         </button>
@@ -1116,11 +1312,14 @@ const ListaVeiculos = () => {
   // ============ EFEITOS ============
 
   /**
-   * Buscar veículos em tempo real
+   * Buscar veículos em tempo real (INCLUI ROTA MONISAT)
    */
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'veiculos'), (snap) => {
-      const veiculosList = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Veiculo));
+      const veiculosList = snap.docs.map(doc => ({ 
+        id: doc.id, 
+        ...doc.data() 
+      } as Veiculo));
       setVeiculos(veiculosList);
       setLoading(false);
     });
@@ -1371,25 +1570,30 @@ const ListaVeiculos = () => {
 
   // ============ CÁLCULOS MEMOIZADOS ============
 
-  const stats = useMemo(() => {
-    return calcularEstatisticas(veiculos, cargasPorVeiculo, motivosPorVeiculo);
-  }, [veiculos, cargasPorVeiculo, motivosPorVeiculo]);
-
+  // Modificar o filtro para incluir busca por motorista
   const filteredVeiculos = useMemo(() => {
     return veiculos.filter(v => {
       const cargaAtiva = cargasPorVeiculo[v.id];
       const temProgramacao = cargaAtiva !== null && cargaAtiva !== undefined;
 
       const matchPlaca = v.placa?.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchMotorista = v.motorista?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                            v.ultimoMotorista?.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchSearch = searchTerm === '' || matchPlaca || matchMotorista;
+      
       const matchTipo = filterTipo === 'todos' || v.tipo === filterTipo;
       
       let matchProgramacao = true;
       if (filterStatus === 'comProgramacao') matchProgramacao = temProgramacao;
       if (filterStatus === 'semProgramacao') matchProgramacao = !temProgramacao;
 
-      return matchPlaca && matchTipo && matchProgramacao;
+      return matchSearch && matchTipo && matchProgramacao;
     });
   }, [veiculos, cargasPorVeiculo, searchTerm, filterTipo, filterStatus]);
+
+  const stats = useMemo(() => {
+    return calcularEstatisticas(veiculos, cargasPorVeiculo, motivosPorVeiculo);
+  }, [veiculos, cargasPorVeiculo, motivosPorVeiculo]);
 
   // ============ RENDERIZAÇÃO ============
 

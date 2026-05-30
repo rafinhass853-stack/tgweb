@@ -10,8 +10,9 @@ import InserirProgramacao from './InserirProgramacao';
 import LeadTime from './LeadTime';
 import Documentacao from './Documentacao';
 import EscalaTodosMotoristas from './EscalaTodosMotoristas';
+import PainelGeral from './PainelGeral';
 
-// Definição de tipos
+// Definição de tipos (APENAS UMA VEZ)
 type MenuItemType = {
   id: string;
   label: string;
@@ -31,13 +32,13 @@ type MenuChildItemType = {
 
 const Menu = () => {
   const [activeTab, setActiveTab] = useState<
+    'painel-geral' |
     'monitoramento' | 
     'frota-motoristas' | 
     'frota-veiculos' |
     'cargas-inserir' |
     'frota-escala-geral'
-    // 'cargas-visualizar' // REMOVIDO
-  >('frota-motoristas'); // ALTERADO: agora começa em frota-motoristas
+  >('painel-geral'); // COMEÇA NO PAINEL GERAL
 
   const [selectedMotoristaId, setSelectedMotoristaId] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -60,13 +61,12 @@ const Menu = () => {
   };
 
   const menuItems: MenuItemType[] = [
-    // BLOCO MONITORAMENTO REMOVIDO - DESATIVADO
-    // {
-    //   id: 'monitoramento',
-    //   label: 'Monitoramento',
-    //   icon: '🗺️',
-    //   color: '#FFD700'
-    // },
+    {
+      id: 'painel-geral',
+      label: 'Painel Geral',
+      icon: '📊',
+      color: '#FFD700'
+    },
     {
       id: 'frota',
       label: 'Frota',
@@ -87,7 +87,6 @@ const Menu = () => {
       isSection: true,
       children: [
         { id: 'cargas-inserir', label: 'Inserir Programação', icon: '➕', color: '#FFD700' }
-        // { id: 'cargas-visualizar', label: 'Visualizar Programações', icon: '👁️', color: '#FFD700' } // REMOVIDO - DESATIVADO
       ]
     },
     {
@@ -105,22 +104,20 @@ const Menu = () => {
   ];
 
   const getCurrentTitle = () => {
-    // if (activeTab === 'monitoramento') return 'Monitoramento'; // REMOVIDO
+    if (activeTab === 'painel-geral') return 'Painel Geral de Tomada de Decisão';
     if (activeTab === 'frota-motoristas') return 'Motoristas Cadastrados';
     if (activeTab === 'frota-veiculos') return 'Veículos Cadastrados';
     if (activeTab === 'frota-escala-geral') return 'Escala Geral de Motoristas';
     if (activeTab === 'cargas-inserir') return 'Inserir Programação';
-    // if (activeTab === 'cargas-visualizar') return 'Visualizar Programações'; // REMOVIDO
     return 'Dashboard';
   };
 
   const getCurrentSubtitle = () => {
-    // if (activeTab === 'monitoramento') return 'Acompanhamento em tempo real'; // REMOVIDO
+    if (activeTab === 'painel-geral') return 'Visão unificada para tomada de decisão estratégica';
     if (activeTab === 'frota-motoristas') return 'Gerencie os motoristas da sua frota';
     if (activeTab === 'frota-veiculos') return 'Gerencie os veículos da sua frota';
     if (activeTab === 'frota-escala-geral') return 'Controle unificado de presenças e folgas';
     if (activeTab === 'cargas-inserir') return 'Cadastre novas cargas no sistema';
-    // if (activeTab === 'cargas-visualizar') return 'Acompanhe e gerencie todas as cargas'; // REMOVIDO
     return 'Gerencie sua frota de forma eficiente';
   };
 
@@ -277,17 +274,25 @@ const Menu = () => {
 
         <div style={contentAreaStyle}>
           <div style={contentWrapperStyle}>
-            {/* {activeTab === 'monitoramento' && <ProgramacaoMapa />} COMENTADO - DESATIVADO */}
+            {/* PAINEL GERAL */}
+            {activeTab === 'painel-geral' && <PainelGeral />}
+            
+            {/* FROTA - MOTORISTAS */}
             {activeTab === 'frota-motoristas' && (
               selectedMotoristaId ? 
                 <MenuMotorista motoristaId={selectedMotoristaId} onVoltar={handleVoltarParaLista} /> 
                 : 
                 <ListaMotoristas onSelectMotorista={handleSelectMotorista} />
             )}
+            
+            {/* FROTA - VEÍCULOS */}
             {activeTab === 'frota-veiculos' && <ListaVeiculos />}
+            
+            {/* FROTA - ESCALA GERAL */}
             {activeTab === 'frota-escala-geral' && <EscalaTodosMotoristas />}
+            
+            {/* CARGAS - INSERIR PROGRAMAÇÃO */}
             {activeTab === 'cargas-inserir' && <InserirProgramacao />}
-            {/* {activeTab === 'cargas-visualizar' && <VisualizarProgramacoes />} COMENTADO - DESATIVADO */}
           </div>
         </div>
       </div>

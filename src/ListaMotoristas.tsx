@@ -13,7 +13,8 @@ import {
   updateDoc,
   serverTimestamp,
   getDocs,
-  getDoc
+  getDoc,
+  writeBatch
 } from 'firebase/firestore';
 import { ref, listAll, getDownloadURL } from 'firebase/storage';
 import {
@@ -107,7 +108,6 @@ interface VeiculoData {
   coordenadas?: { lat: number; lng: number };
   ultimaMacro?: string;
   ignicao?: string;
-  // NOVO CAMPO: Rota do MONISAT
   rotaMonisat?: string;
   ultimaAtualizacaoRotaMonisat?: any;
 }
@@ -176,6 +176,7 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
   const [filtrosAbertos, setFiltrosAbertos] = useState(false);
   
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
+  const [showDeleteAllCargasConfirm, setShowDeleteAllCargasConfirm] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadingData, setLoadingData] = useState(true);
   const [loadingEscalaInfo, setLoadingEscalaInfo] = useState<Record<string, boolean>>({});
@@ -211,6 +212,70 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
   const socketRef = useRef<any>(null);
 
   const hoje = new Date().toISOString().split('T')[0];
+
+  // FUNÇÃO PARA EXCLUIR TODAS AS CARGAS
+  const handleDeleteAllCargas = async () => {
+    setLoading(true);
+    let totalDeleted = 0;
+    let errors = 0;
+
+    try {
+      // Percorre todos os motoristas
+      for (const motorista of motoristas) {
+        if (!motorista.id) continue;
+
+        try {
+          // Busca todas as cargas do motorista (não apenas ativas)
+          const cargasRef = collection(db, 'motoristas', motorista.id, 'cargas');
+          const cargasSnapshot = await getDocs(cargasRef);
+          
+          if (cargasSnapshot.empty) continue;
+
+          // Usa batch para excluir em lote (máximo 500 por batch)
+          const batch = writeBatch(db);
+          let batchCount = 0;
+          
+          for (const cargaDoc of cargasSnapshot.docs) {
+            batch.delete(cargaDoc.ref);
+            batchCount++;
+            totalDeleted++;
+
+            // Executa batch a cada 500 operações ou no final
+            if (batchCount >= 500) {
+              await batch.commit();
+              batchCount = 0;
+            }
+          }
+          
+          // Commit do último batch
+          if (batchCount > 0) {
+            await batch.commit();
+          }
+          
+        } catch (error) {
+          console.error(`Erro ao excluir cargas do motorista ${motorista.nome}:`, error);
+          errors++;
+        }
+      }
+
+      if (errors === 0) {
+        showNotification(`✅ ${totalDeleted} carga(s) excluída(s) com sucesso!`, 'success');
+      } else {
+        showNotification(`⚠️ ${totalDeleted} carga(s) excluída(s) com ${errors} erro(s)`, 'error');
+      }
+      
+      setShowDeleteAllCargasConfirm(false);
+      
+      // Atualiza o estado local removendo todas as cargas
+      setCargasPorMotorista({});
+      
+    } catch (error) {
+      console.error('Erro ao excluir todas as cargas:', error);
+      showNotification('❌ Erro ao excluir todas as cargas', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // FUNÇÕES DO WHATSAPP
   const checkWhatsAppStatus = async () => {
@@ -590,7 +655,6 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
               : undefined,
           ultimaMacro: data.ultimaMacro || data.ultimoStatus || undefined,
           ignicao: data.ignicao || undefined,
-          // NOVO: Rota do MONISAT
           rotaMonisat: data.rotaMonisat || undefined,
           ultimaAtualizacaoRotaMonisat: data.ultimaAtualizacaoRotaMonisat || undefined
         };
@@ -1192,6 +1256,7 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
   const btnCloseStyle: React.CSSProperties = { backgroundColor: 'rgba(239, 68, 68, 0.2)', color: '#EF4444', border: 'none', borderRadius: '50%', width: '35px', height: '35px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' };
   const galeriaGridStyle: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: '12px', marginTop: '16px' };
   const thumbnailStyle: React.CSSProperties = { width: '100%', height: '100px', objectFit: 'cover', borderRadius: '8px', border: '2px solid #333', cursor: 'pointer' };
+  const dangerBtnStyle: React.CSSProperties = { backgroundColor: '#DC2626', color: '#FFF', padding: '10px 20px', borderRadius: '12px', border: 'none', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px' };
 
   const notificationsOverlayStyle: React.CSSProperties = { position: 'fixed', top: 80, right: 20, zIndex: 10000 };
   const notificationsPanelStyle: React.CSSProperties = { backgroundColor: '#0A0A0A', borderRadius: '16px', width: '320px', maxHeight: '400px', border: '1px solid #FFD700', overflow: 'hidden', boxShadow: '0 10px 25px rgba(0,0,0,0.5)' };
@@ -1270,6 +1335,13 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
           >
             {visaoAtiva === 'lista' ? '🗺️ Visão em Mapa' : '📋 Voltar para Lista'}
           </button>
+          <button 
+            style={dangerBtnStyle} 
+            onClick={() => setShowDeleteAllCargasConfirm(true)}
+            disabled={loading}
+          >
+            <Trash2 size={18} /> Excluir Todas as Cargas
+          </button>
           <div style={statsContainerStyle}>
             <div style={statItemStyle}><span style={statNumberStyle}>{stats.total}</span><span style={statLabelStyle}>Total</span></div>
             <div style={statItemStyle}><span style={{ ...statNumberStyle, color: '#22C55E' }}>{stats.comProgramacao}</span><span style={statLabelStyle}>Programados</span></div>
@@ -1278,6 +1350,40 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
           </div>
         </div>
       </div>
+
+      {/* MODAL DE CONFIRMAÇÃO PARA EXCLUIR TODAS AS CARGAS */}
+      {showDeleteAllCargasConfirm && (
+        <div style={deleteConfirmModalStyle}>
+          <div style={deleteConfirmContentStyle}>
+            <h3 style={{ color: '#EF4444', marginBottom: '20px' }}>⚠️ Atenção!</h3>
+            <p style={{ color: '#AAA', marginBottom: '10px' }}>
+              Esta ação irá <strong style={{ color: '#EF4444' }}>EXCLUIR PERMANENTEMENTE</strong> TODAS as cargas de <strong>TODOS</strong> os motoristas.
+            </p>
+            <p style={{ color: '#666', fontSize: '12px', marginBottom: '20px' }}>
+              Isso inclui cargas programadas, em andamento e finalizadas. Esta ação não pode ser desfeita.
+            </p>
+            <p style={{ color: '#FFD700', fontSize: '13px', marginBottom: '25px' }}>
+              Deseja realmente continuar?
+            </p>
+            <div style={deleteConfirmButtonsStyle}>
+              <button 
+                style={{ ...deleteConfirmBtnStyle, backgroundColor: '#333', color: '#AAA' }} 
+                onClick={() => setShowDeleteAllCargasConfirm(false)}
+                disabled={loading}
+              >
+                Cancelar
+              </button>
+              <button 
+                style={{ ...deleteConfirmBtnStyle, backgroundColor: '#EF4444', color: '#fff' }} 
+                onClick={handleDeleteAllCargas}
+                disabled={loading}
+              >
+                {loading ? 'Excluindo...' : 'Sim, Excluir Todas'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* FILTROS */}
       <div style={filtersContainerStyle}>
@@ -1342,7 +1448,6 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
                 const statusRastreador = veiculoData?.statusRastreador;
                 const ignicao = veiculoData?.ignicao;
                 
-                // NOVOS DADOS DO MONISAT
                 const rotaMonisat = veiculoData?.rotaMonisat || null;
                 const ultimaAtualizacaoRota = veiculoData?.ultimaAtualizacaoRotaMonisat;
 
@@ -1406,7 +1511,6 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
                             <div style={monitoriaRowStyle}><span style={monitoriaLabelStyle}>🕐 ÚLTIMA ATUALIZAÇÃO:</span><span style={{ ...monitoriaValueStyle, color: '#FFD700' }}>{formatarUltimaAtualizacao(ultimaAtualizacao)}</span></div>
                             {veiculoData?.ultimaMacro && <div style={monitoriaRowStyle}><span style={monitoriaLabelStyle}>🏷️ ÚLTIMA MACRO:</span><span style={{ ...monitoriaValueStyle, color: '#FFD700' }}>{veiculoData.ultimaMacro}</span></div>}
                             
-                            {/* NOVO: ROTA DO MONISAT */}
                             {rotaMonisat && (
                               <>
                                 <div style={{ ...monitoriaRowStyle, borderTop: '1px solid #2A2A2A', marginTop: '4px', paddingTop: '8px' }}>
@@ -1432,7 +1536,7 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
                             {checkin?.localizacaoReal && <div style={monitoriaRowStyle}><span style={monitoriaLabelStyle}>📍 LOCALIZAÇÃO CHECK-IN:</span><span style={monitoriaValueStyle}>{checkin.localizacaoReal}</span></div>}
                             <div style={buttonGroupStyle}>
                               {checkin?.fotoUrl && <button style={{ ...smallButtonStyle, backgroundColor: '#3B82F620', color: '#3B82F6', border: '1px solid #3B82F6' }} onClick={(e) => { e.stopPropagation(); setSelectedPhoto(checkin.fotoUrl!); setShowPhotoModal(true); }}><Camera size={12} /> Ver Foto Check-in</button>}
-                              {canhotos && canhotos.length > 0 && <button style={{ ...smallButtonStyle, backgroundColor: '#FFD70020', color: '#FFD700', border: '1px solid #FFD700' }} onClick={(e) => { e.stopPropagation(); setCanhotosModalData({ canhotos, cargaNome: m.nome }); setShowCanhotosModal(true); }}><Images size={12} /> Ver {canhotos.length} Canhoto(s)</button>}
+                              {canhotos && canhotos.length > 0 && <button style={{ ...smallButtonStyle, backgroundColor: '#FFD70020', color: '#FFD700', border: '1px solid #FFD700' }} onClick={(e) => { e.stopPropagation(); setCanhotosModalData({ canhotos, cargaNome: m.nome }); setShowCanhotosModal(true); }}><Printer size={12} /> Ver {canhotos.length} Canhoto(s)</button>}
                               {isLoadingCanhotos && <span style={{ fontSize: '10px', color: '#AAA' }}>Carregando...</span>}
                             </div>
                           </div>
