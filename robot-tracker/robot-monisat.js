@@ -205,4 +205,17 @@ async function capturarRotas() {
   }
 }
 
-capturarRotas();
+// Função para executar em loop com intervalo de 5 minutos
+async function executarLoop() {
+  console.log('🔄 Sistema iniciado - Executando a cada 5 minutos');
+  console.log('⏰ Próxima execução em 5 minutos\n');
+  
+  while (true) {
+    await capturarRotas();
+    console.log('⏳ Aguardando 5 minutos para próxima execução...');
+    await delay(5 * 60 * 1000); // 5 minutos em milissegundos
+  }
+}
+
+// Iniciar o loop
+executarLoop().catch(console.error);

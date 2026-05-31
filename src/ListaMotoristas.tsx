@@ -39,6 +39,8 @@ interface Motorista {
   fotoPerfilUrl?: string;
   uid?: string;
   viagensRealizadas?: number;
+  statusMotorista?: string;
+  observacaoMotorista?: string;
 }
 
 interface CargaProgramada {
@@ -112,6 +114,14 @@ interface VeiculoData {
   ultimaAtualizacaoRotaMonisat?: any;
 }
 
+interface VeiculoCompleto {
+  id: string;
+  placa: string;
+  tipo: string;
+  motorista?: string;
+  ultimoMotorista?: string;
+}
+
 interface EscalaInfo {
   diasConsecutivosTrabalhados: number;
   precisaFolgar: boolean;
@@ -129,6 +139,17 @@ interface Notification {
   timestamp: Date;
   telefone: string;
 }
+
+// STATUS DO MOTORISTA PARA FILTRO SEM PROGRAMAÇÃO
+const STATUS_MOTORISTA_OPTS = {
+  'disponivel': { label: 'Disponível para Programar', icon: '✅', cor: '#22C55E', bg: '#22C55E20' },
+  'folga': { label: 'Folga', icon: '😴', cor: '#FFD700', bg: '#FFD70020' },
+  'ferias': { label: 'Férias', icon: '🏖️', cor: '#FFD700', bg: '#FFD70020' },
+  'sem_veiculo': { label: 'Sem Veículo', icon: '🚫', cor: '#EF4444', bg: '#EF444420' },
+  'falta': { label: 'Falta', icon: '❌', cor: '#EF4444', bg: '#EF444420' },
+  'atestado': { label: 'Atestado', icon: '📋', cor: '#8B5CF6', bg: '#8B5CF620' },
+  'veiculo_manutencao': { label: 'Veículo em Manutenção', icon: '🔧', cor: '#FF9500', bg: '#FF950020' }
+};
 
 const TIPOS_ESCALA = {
   'Presente': { label: 'Disponível para Programar', icon: '✅', cor: '#22C55E', bg: '#1A2A1A' },
@@ -155,10 +176,12 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
   const [escalaHojePorMotorista, setEscalaHojePorMotorista] = useState<Record<string, EventoEscala | null>>({});
   const [escalaInfoPorMotorista, setEscalaInfoPorMotorista] = useState<Record<string, EscalaInfo>>({});
   const [veiculos, setVeiculos] = useState<Record<string, VeiculoData>>({});
+  const [veiculosCompletos, setVeiculosCompletos] = useState<Record<string, VeiculoCompleto>>({});
   const [observacoesMotoristas, setObservacoesMotoristas] = useState<Record<string, string>>({});
   const [observacaoEditando, setObservacaoEditando] = useState<string | null>(null);
-  const [anotacoesMotoristas, setAnotacoesMotoristas] = useState<Record<string, string>>({});
-  const [anotacaoEditando, setAnotacaoEditando] = useState<string | null>(null);
+  const [statusMotoristaEditando, setStatusMotoristaEditando] = useState<string | null>(null);
+  const [statusSelecionado, setStatusSelecionado] = useState<Record<string, string>>({});
+  const [observacaoTemp, setObservacaoTemp] = useState<Record<string, string>>({});
   const [visaoAtiva, setVisaoAtiva] = useState<'lista' | 'mapa'>('lista');
   const [motoristasParaMapa, setMotoristasParaMapa] = useState<any[]>([]);
   
@@ -213,6 +236,43 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
 
   const hoje = new Date().toISOString().split('T')[0];
 
+  // Função para encontrar veículo que o motorista está embarcado
+  const getVeiculoEmbarcado = (motoristaNome: string): VeiculoCompleto | null => {
+    const veiculoEncontrado = Object.values(veiculosCompletos).find(veiculo => 
+      veiculo.motorista?.toUpperCase() === motoristaNome.toUpperCase() ||
+      veiculo.ultimoMotorista?.toUpperCase() === motoristaNome.toUpperCase()
+    );
+    return veiculoEncontrado || null;
+  };
+
+  // Carregar status e observações salvos do localStorage
+  useEffect(() => {
+    motoristas.forEach(m => {
+      const savedStatus = localStorage.getItem(`status_motorista_${m.id}`);
+      if (savedStatus) {
+        setStatusSelecionado(prev => ({ ...prev, [m.id]: savedStatus }));
+      }
+      const savedObservacao = localStorage.getItem(`observacao_temp_${m.id}`);
+      if (savedObservacao) {
+        setObservacaoTemp(prev => ({ ...prev, [m.id]: savedObservacao }));
+      }
+    });
+  }, [motoristas]);
+
+  const salvarStatusMotorista = (motoristaId: string, status: string) => {
+    setStatusSelecionado(prev => ({ ...prev, [motoristaId]: status }));
+    localStorage.setItem(`status_motorista_${motoristaId}`, status);
+    setStatusMotoristaEditando(null);
+    showNotification(`Status alterado para: ${STATUS_MOTORISTA_OPTS[status as keyof typeof STATUS_MOTORISTA_OPTS]?.label || status}`, 'success');
+  };
+
+  const salvarObservacaoTemp = (motoristaId: string, observacao: string) => {
+    setObservacaoTemp(prev => ({ ...prev, [motoristaId]: observacao }));
+    localStorage.setItem(`observacao_temp_${motoristaId}`, observacao);
+    setObservacaoEditando(null);
+    showNotification('Observação salva com sucesso!', 'success');
+  };
+
   // FUNÇÃO PARA EXCLUIR TODAS AS CARGAS
   const handleDeleteAllCargas = async () => {
     setLoading(true);
@@ -220,18 +280,15 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
     let errors = 0;
 
     try {
-      // Percorre todos os motoristas
       for (const motorista of motoristas) {
         if (!motorista.id) continue;
 
         try {
-          // Busca todas as cargas do motorista (não apenas ativas)
           const cargasRef = collection(db, 'motoristas', motorista.id, 'cargas');
           const cargasSnapshot = await getDocs(cargasRef);
           
           if (cargasSnapshot.empty) continue;
 
-          // Usa batch para excluir em lote (máximo 500 por batch)
           const batch = writeBatch(db);
           let batchCount = 0;
           
@@ -240,14 +297,12 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
             batchCount++;
             totalDeleted++;
 
-            // Executa batch a cada 500 operações ou no final
             if (batchCount >= 500) {
               await batch.commit();
               batchCount = 0;
             }
           }
           
-          // Commit do último batch
           if (batchCount > 0) {
             await batch.commit();
           }
@@ -265,8 +320,6 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
       }
       
       setShowDeleteAllCargasConfirm(false);
-      
-      // Atualiza o estado local removendo todas as cargas
       setCargasPorMotorista({});
       
     } catch (error) {
@@ -319,7 +372,6 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
     }
   };
 
-  // Função para abrir modal de chat/histórico
   const abrirWhatsAppChat = (telefone: string | undefined, nome: string) => {
     if (!telefone || telefone === '—' || telefone === 'Não informado') {
       alert(`⚠️ Número de telefone não disponível para ${nome}`);
@@ -344,7 +396,6 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
     }
   };
 
-  // Conectar ao socket para notificações em tempo real
   useEffect(() => {
     if (Notification.permission === 'default') {
       Notification.requestPermission();
@@ -376,7 +427,6 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
     };
   }, [motoristas]);
 
-  // RECUPERAR ESTADO AO VOLTAR DO RELATÓRIO
   useEffect(() => {
     const savedState = sessionStorage.getItem('listaMotoristasState');
     if (savedState && location.pathname === '/motoristas') {
@@ -405,7 +455,6 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
     }
   }, [location.pathname]);
 
-  // GARANTIR QUE O LAYOUT DO MENU PERMANEÇA
   useEffect(() => {
     const timeout = setTimeout(() => {
       const appContainer = document.querySelector('.app-container') as HTMLElement;
@@ -593,42 +642,26 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
     }
   };
 
+  // Buscar veículos completos (com motorista)
   useEffect(() => {
-    const savedObservacoes: Record<string, string> = {};
-    motoristas.forEach(m => {
-      const saved = localStorage.getItem(`observacao_motorista_${m.id}`);
-      if (saved) {
-        savedObservacoes[m.id] = saved;
-      }
+    const unsub = onSnapshot(collection(db, "veiculos"), (snap) => {
+      const veiculosCompletosMap: Record<string, VeiculoCompleto> = {};
+      snap.forEach(doc => {
+        const data = doc.data();
+        veiculosCompletosMap[data.placa] = {
+          id: doc.id,
+          placa: data.placa,
+          tipo: data.tipo,
+          motorista: data.motorista,
+          ultimoMotorista: data.ultimoMotorista
+        };
+      });
+      setVeiculosCompletos(veiculosCompletosMap);
     });
-    setObservacoesMotoristas(savedObservacoes);
-  }, [motoristas]);
+    return () => unsub();
+  }, []);
 
-  useEffect(() => {
-    const savedAnotacoes: Record<string, string> = {};
-    motoristas.forEach(m => {
-      const saved = localStorage.getItem(`anotacao_motorista_${m.id}`);
-      if (saved) {
-        savedAnotacoes[m.id] = saved;
-      }
-    });
-    setAnotacoesMotoristas(savedAnotacoes);
-  }, [motoristas]);
-
-  const salvarObservacao = (motoristaId: string, observacao: string) => {
-    setObservacoesMotoristas(prev => ({ ...prev, [motoristaId]: observacao }));
-    localStorage.setItem(`observacao_motorista_${motoristaId}`, observacao);
-    setObservacaoEditando(null);
-    showNotification('Observação salva com sucesso!', 'success');
-  };
-
-  const salvarAnotacao = (motoristaId: string, anotacao: string) => {
-    setAnotacoesMotoristas(prev => ({ ...prev, [motoristaId]: anotacao }));
-    localStorage.setItem(`anotacao_motorista_${motoristaId}`, anotacao);
-    setAnotacaoEditando(null);
-    showNotification('Anotação salva com sucesso!', 'success');
-  };
-
+  // Buscar dados de rastreamento dos veículos
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "veiculos"), (snap) => {
       const veiculosMap: Record<string, VeiculoData> = {};
@@ -771,7 +804,6 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
     };
   }, [motoristas, hoje]);
 
-  // PREPARAR DADOS PARA O MAPA
   useEffect(() => {
     const dadosParaMapa = motoristas.map(m => {
       const carga = cargasPorMotorista[m.id];
@@ -1046,27 +1078,39 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
   };
 
   const getStatusMotorista = (motorista: Motorista, carga: CargaProgramada | null, eventoEscala: EventoEscala | null) => {
-    if (eventoEscala) {
-      if (eventoEscala.tipo === 'Descanso Semanal' || eventoEscala.tipo === 'Férias') {
-        return { label: 'Em Folga Hoje', cor: '#FFD700', bg: '#FFD70020', icon: '😴', value: 'folga' };
-      }
-      if (eventoEscala.tipo === 'Presente' && !carga) {
-        return { label: 'Disponível para Programar', cor: '#22C55E', bg: '#22C55E20', icon: '✅', value: 'disponivel' };
-      }
-    }
-    
+    // Se tem carga, mostra o status da carga
     if (carga) {
       const statusCarga = STATUS_CARGA_MAP[carga.status];
       if (statusCarga) {
-        return { ...statusCarga, value: carga.status };
+        return { ...statusCarga, value: carga.status, isCarga: true };
       }
     }
     
-    if (!eventoEscala || eventoEscala.tipo === 'Presente') {
-      return { label: 'Disponível para Programar', cor: '#22C55E', bg: '#22C55E20', icon: '✅', value: 'disponivel' };
+    // Se tem status manual salvo, mostra ele
+    const statusManual = statusSelecionado[motorista.id];
+    if (statusManual && STATUS_MOTORISTA_OPTS[statusManual as keyof typeof STATUS_MOTORISTA_OPTS]) {
+      const statusOpt = STATUS_MOTORISTA_OPTS[statusManual as keyof typeof STATUS_MOTORISTA_OPTS];
+      return { label: statusOpt.label, cor: statusOpt.cor, bg: statusOpt.bg, icon: statusOpt.icon, value: statusManual, isManual: true };
     }
     
-    return { label: 'Status Indefinido', cor: '#666', bg: '#666620', icon: '❓', value: 'indefinido' };
+    // Verifica escala do dia
+    if (eventoEscala) {
+      if (eventoEscala.tipo === 'Descanso Semanal') {
+        return { label: 'Folga', cor: '#FFD700', bg: '#FFD70020', icon: '😴', value: 'folga' };
+      }
+      if (eventoEscala.tipo === 'Férias') {
+        return { label: 'Férias', cor: '#FFD700', bg: '#FFD70020', icon: '🏖️', value: 'ferias' };
+      }
+      if (eventoEscala.tipo === 'Falta') {
+        return { label: 'Falta', cor: '#EF4444', bg: '#EF444420', icon: '❌', value: 'falta' };
+      }
+      if (eventoEscala.tipo === 'Atestado') {
+        return { label: 'Atestado', cor: '#8B5CF6', bg: '#8B5CF620', icon: '📋', value: 'atestado' };
+      }
+    }
+    
+    // Se não tem carga, nem escala, está disponível
+    return { label: 'Disponível para Programar', cor: '#22C55E', bg: '#22C55E20', icon: '✅', value: 'disponivel' };
   };
 
   const showNotification = (message: string, type: 'success' | 'error') => {
@@ -1154,6 +1198,27 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
            filtroClienteEntrega !== '' || filtroDataEntrega !== '';
   };
 
+  // Função para obter o status atual do motorista (considerando carga, status manual e escala)
+  const getMotoristaStatusKey = (motorista: Motorista) => {
+    const carga = cargasPorMotorista[motorista.id];
+    const eventoHoje = escalaHojePorMotorista[motorista.id];
+    
+    if (carga) return 'comProgramacao';
+    
+    const statusManual = statusSelecionado[motorista.id];
+    if (statusManual) return statusManual;
+    
+    if (eventoHoje) {
+      if (eventoHoje.tipo === 'Descanso Semanal') return 'folga';
+      if (eventoHoje.tipo === 'Férias') return 'ferias';
+      if (eventoHoje.tipo === 'Falta') return 'falta';
+      if (eventoHoje.tipo === 'Atestado') return 'atestado';
+    }
+    
+    return 'disponivel';
+  };
+
+  // Estatísticas detalhadas
   const stats = useMemo(() => {
     const total = motoristas.length;
     const comProgramacao = motoristas.filter(m => cargasPorMotorista[m.id] !== null && cargasPorMotorista[m.id] !== undefined).length;
@@ -1161,8 +1226,74 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
     const comMopp = motoristas.filter(m => m.temMopp === 'Sim').length;
     const semMopp = total - comMopp;
     const totalViagens = motoristas.reduce((sum, m) => sum + (m.viagensRealizadas || 0), 0);
-    return { total, comProgramacao, semProgramacao, comMopp, semMopp, totalViagens };
-  }, [motoristas, cargasPorMotorista]);
+    
+    // Estatísticas de status dos motoristas sem programação
+    const disponiveis = motoristas.filter(m => {
+      const carga = cargasPorMotorista[m.id];
+      if (carga) return false;
+      const statusManual = statusSelecionado[m.id];
+      if (statusManual) return statusManual === 'disponivel';
+      const eventoHoje = escalaHojePorMotorista[m.id];
+      if (eventoHoje?.tipo === 'Descanso Semanal' || eventoHoje?.tipo === 'Férias' || 
+          eventoHoje?.tipo === 'Falta' || eventoHoje?.tipo === 'Atestado') return false;
+      return true;
+    }).length;
+    
+    const folga = motoristas.filter(m => {
+      const carga = cargasPorMotorista[m.id];
+      if (carga) return false;
+      const statusManual = statusSelecionado[m.id];
+      if (statusManual === 'folga') return true;
+      const eventoHoje = escalaHojePorMotorista[m.id];
+      return eventoHoje?.tipo === 'Descanso Semanal';
+    }).length;
+    
+    const ferias = motoristas.filter(m => {
+      const carga = cargasPorMotorista[m.id];
+      if (carga) return false;
+      const statusManual = statusSelecionado[m.id];
+      if (statusManual === 'ferias') return true;
+      const eventoHoje = escalaHojePorMotorista[m.id];
+      return eventoHoje?.tipo === 'Férias';
+    }).length;
+    
+    const semVeiculo = motoristas.filter(m => {
+      const carga = cargasPorMotorista[m.id];
+      if (carga) return false;
+      const statusManual = statusSelecionado[m.id];
+      return statusManual === 'sem_veiculo';
+    }).length;
+    
+    const veiculoManutencao = motoristas.filter(m => {
+      const carga = cargasPorMotorista[m.id];
+      if (carga) return false;
+      const statusManual = statusSelecionado[m.id];
+      return statusManual === 'veiculo_manutencao';
+    }).length;
+    
+    const falta = motoristas.filter(m => {
+      const carga = cargasPorMotorista[m.id];
+      if (carga) return false;
+      const statusManual = statusSelecionado[m.id];
+      if (statusManual === 'falta') return true;
+      const eventoHoje = escalaHojePorMotorista[m.id];
+      return eventoHoje?.tipo === 'Falta';
+    }).length;
+    
+    const atestado = motoristas.filter(m => {
+      const carga = cargasPorMotorista[m.id];
+      if (carga) return false;
+      const statusManual = statusSelecionado[m.id];
+      if (statusManual === 'atestado') return true;
+      const eventoHoje = escalaHojePorMotorista[m.id];
+      return eventoHoje?.tipo === 'Atestado';
+    }).length;
+    
+    return { 
+      total, comProgramacao, semProgramacao, comMopp, semMopp, totalViagens,
+      disponiveis, folga, ferias, semVeiculo, veiculoManutencao, falta, atestado
+    };
+  }, [motoristas, cargasPorMotorista, statusSelecionado, escalaHojePorMotorista]);
 
   const getInitials = (nome: string) => nome.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
   const getRandomColor = (id: string) => {
@@ -1170,9 +1301,15 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
     return colors[parseInt(id.slice(0, 8), 16) % colors.length];
   };
 
-  const handleCardClick = (motorista: Motorista, e: React.MouseEvent) => {
-    if ((e.target as HTMLElement).closest('button')) return;
-    onSelectMotorista(motorista.id);
+  // NOVA FUNÇÃO - Clique apenas no nome ou botão de ver detalhes
+  const handleNomeClick = (motoristaId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    onSelectMotorista(motoristaId);
+  };
+
+  const handleVerDetalhes = (motoristaId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    onSelectMotorista(motoristaId);
   };
 
   // ESTILOS
@@ -1181,10 +1318,12 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
   const titleStyle: React.CSSProperties = { fontSize: '32px', fontWeight: 900, color: '#FFF', margin: 0 };
   const subtitleStyle: React.CSSProperties = { margin: '8px 0 0 0', color: '#666', fontSize: '14px' };
   const reportBtnStyle: React.CSSProperties = { backgroundColor: '#FFD700', color: '#000', padding: '10px 20px', borderRadius: '12px', border: 'none', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px' };
-  const statsContainerStyle: React.CSSProperties = { display: 'flex', gap: '24px', backgroundColor: '#0A0A0A', padding: '12px 24px', borderRadius: '16px', border: '1px solid #1A1A1A' };
-  const statItemStyle: React.CSSProperties = { textAlign: 'center' };
-  const statNumberStyle: React.CSSProperties = { fontSize: '20px', fontWeight: 800, color: '#FFF', margin: 0 };
-  const statLabelStyle: React.CSSProperties = { fontSize: '11px', color: '#666', textTransform: 'uppercase', fontWeight: 700, marginTop: '4px' };
+  
+  // Novo estilo para o dashboard expandido
+  const statsGridStyle: React.CSSProperties = { display: 'flex', gap: '12px', backgroundColor: '#0A0A0A', padding: '16px 24px', borderRadius: '16px', border: '1px solid #1A1A1A', flexWrap: 'wrap', justifyContent: 'center' };
+  const statsGridItemStyle: React.CSSProperties = { textAlign: 'center', minWidth: '70px' };
+  const statsGridNumberStyle: React.CSSProperties = { fontSize: '18px', fontWeight: 800, color: '#FFF', margin: 0 };
+  const statsGridLabelStyle: React.CSSProperties = { fontSize: '10px', color: '#666', textTransform: 'uppercase', fontWeight: 700, marginTop: '4px' };
   
   const filtersContainerStyle: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '32px', flexWrap: 'wrap', gap: '20px' };
   const filterBtnStyle: React.CSSProperties = { background: '#0f0f0f', border: '1px solid #27272a', borderRadius: '14px', padding: '11px 20px', color: '#e5e7eb', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', fontWeight: '500' };
@@ -1207,13 +1346,13 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
   const emptyStateStyle: React.CSSProperties = { textAlign: 'center', padding: '60px 20px', color: '#666', backgroundColor: '#0A0A0A', borderRadius: '24px', border: '1px solid #1A1A1A', marginTop: '32px' };
   const gridStyle: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(480px, 1fr))', gap: '24px' };
 
-  const cardStyle: React.CSSProperties = { backgroundColor: '#0A0A0A', borderRadius: '24px', boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.3)', border: '1px solid #1A1A1A', overflow: 'hidden', cursor: 'pointer', transition: 'all 0.2s' };
+  const cardStyle: React.CSSProperties = { backgroundColor: '#0A0A0A', borderRadius: '24px', boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.3)', border: '1px solid #1A1A1A', overflow: 'hidden', transition: 'all 0.2s' };
   const fotoWrapperStyle: React.CSSProperties = { height: '100px', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#000', fontSize: '40px', fontWeight: 800 };
   const fotoStyle: React.CSSProperties = { width: '100%', height: '100%', objectFit: 'cover', position: 'absolute', top: 0, left: 0 };
   const initialsStyle: React.CSSProperties = { zIndex: 1 };
   const moppBadgeStyle: React.CSSProperties = { position: 'absolute', bottom: '10px', right: '10px', backgroundColor: 'rgba(0,0,0,0.7)', color: '#FFF', padding: '4px 10px', borderRadius: '8px', fontSize: '11px', fontWeight: 600 };
   const contentStyle: React.CSSProperties = { padding: '20px' };
-  const nomeStyle: React.CSSProperties = { fontSize: '18px', fontWeight: 800, color: '#FFF', margin: '0 0 4px 0' };
+  const nomeStyle: React.CSSProperties = { fontSize: '18px', fontWeight: 800, color: '#FFF', margin: '0 0 4px 0', cursor: 'pointer' };
   const cpfStyle: React.CSSProperties = { fontSize: '13px', color: '#888', margin: '0 0 12px 0' };
   const infoGridStyle: React.CSSProperties = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '16px' };
   const infoItemStyle: React.CSSProperties = { fontSize: '12px', color: '#AAA', display: 'flex', alignItems: 'center', gap: '6px' };
@@ -1221,9 +1360,20 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
   const infoEscalaRowStyle: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center' };
   const infoEscalaLabelStyle: React.CSSProperties = { fontSize: '10px', fontWeight: 600, color: '#888', textTransform: 'uppercase' };
   const infoEscalaValueStyle: React.CSSProperties = { fontSize: '13px', fontWeight: 700, color: '#FFD700' };
-  const anotacaoContainerStyle: React.CSSProperties = { marginTop: '12px', marginBottom: '12px', padding: '10px', backgroundColor: '#1A1A2A', borderRadius: '10px', borderLeft: `3px solid #FFD700` };
-  const anotacaoTextStyle: React.CSSProperties = { fontSize: '11px', color: '#DDD', margin: '4px 0', wordBreak: 'break-word' };
-  const anotacaoInputStyle: React.CSSProperties = { width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid #FFD700', fontSize: '11px', backgroundColor: '#111', color: '#FFF', marginTop: '8px' };
+  
+  // Estilo para o card de status do motorista (para filtro sem programação)
+  const statusCardStyle = (bg: string, border: string): React.CSSProperties => ({ 
+    padding: '12px', 
+    borderRadius: '12px', 
+    marginBottom: '16px', 
+    backgroundColor: bg, 
+    border: `1px solid ${border}`,
+    cursor: 'pointer'
+  });
+  
+  const observacaoContainerStyle: React.CSSProperties = { marginTop: '12px', marginBottom: '12px', padding: '10px', backgroundColor: '#1A1A2A', borderRadius: '10px', borderLeft: `3px solid #FFD700` };
+  const observacaoTextStyle: React.CSSProperties = { fontSize: '11px', color: '#DDD', margin: '4px 0', wordBreak: 'break-word' };
+  const observacaoInputStyle: React.CSSProperties = { width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid #FFD700', fontSize: '11px', backgroundColor: '#111', color: '#FFF', marginTop: '8px' };
   const programacaoContainerStyle: React.CSSProperties = { borderTop: '1px solid #1F1F1F', paddingTop: '16px', marginTop: '8px' };
   const programacaoHeaderStyle: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', flexWrap: 'wrap' };
   const programacaoTitleStyle: React.CSSProperties = { fontSize: '12px', fontWeight: 800, color: '#AAA', textTransform: 'uppercase', margin: 0 };
@@ -1257,6 +1407,8 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
   const galeriaGridStyle: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: '12px', marginTop: '16px' };
   const thumbnailStyle: React.CSSProperties = { width: '100%', height: '100px', objectFit: 'cover', borderRadius: '8px', border: '2px solid #333', cursor: 'pointer' };
   const dangerBtnStyle: React.CSSProperties = { backgroundColor: '#DC2626', color: '#FFF', padding: '10px 20px', borderRadius: '12px', border: 'none', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px' };
+  const statusSelectStyle: React.CSSProperties = { width: '100%', padding: '8px', borderRadius: '8px', border: `1px solid #FFD700`, fontSize: '12px', backgroundColor: '#111', color: '#FFF', marginTop: '8px' };
+  const observacaoTextareaStyle: React.CSSProperties = { width: '100%', padding: '8px', borderRadius: '8px', border: `1px solid #FFD700`, fontSize: '11px', backgroundColor: '#111', color: '#FFF', marginTop: '8px', resize: 'vertical' };
 
   const notificationsOverlayStyle: React.CSSProperties = { position: 'fixed', top: 80, right: 20, zIndex: 10000 };
   const notificationsPanelStyle: React.CSSProperties = { backgroundColor: '#0A0A0A', borderRadius: '16px', width: '320px', maxHeight: '400px', border: '1px solid #FFD700', overflow: 'hidden', boxShadow: '0 10px 25px rgba(0,0,0,0.5)' };
@@ -1281,6 +1433,10 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
           word-break: break-word;
           white-space: normal;
           line-height: 1.4;
+        }
+        .nome-motorista:hover {
+          text-decoration: underline;
+          color: #FFD700;
         }
       `}</style>
 
@@ -1342,13 +1498,26 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
           >
             <Trash2 size={18} /> Excluir Todas as Cargas
           </button>
-          <div style={statsContainerStyle}>
-            <div style={statItemStyle}><span style={statNumberStyle}>{stats.total}</span><span style={statLabelStyle}>Total</span></div>
-            <div style={statItemStyle}><span style={{ ...statNumberStyle, color: '#22C55E' }}>{stats.comProgramacao}</span><span style={statLabelStyle}>Programados</span></div>
-            <div style={statItemStyle}><span style={{ ...statNumberStyle, color: '#EF4444' }}>{stats.semProgramacao}</span><span style={statLabelStyle}>Disponíveis</span></div>
-            <div style={statItemStyle}><span style={{ ...statNumberStyle, color: '#FFD700' }}>{stats.totalViagens}</span><span style={statLabelStyle}>Viagens</span></div>
-          </div>
         </div>
+      </div>
+
+      {/* DASHBOARD EXPANDIDO COM TODOS OS STATUS */}
+      <div style={statsGridStyle}>
+        <div style={statsGridItemStyle}><span style={statsGridNumberStyle}>{stats.total}</span><span style={statsGridLabelStyle}>Total</span></div>
+        <div style={{ width: '1px', backgroundColor: '#333', margin: '0 8px' }} />
+        <div style={statsGridItemStyle}><span style={{ ...statsGridNumberStyle, color: '#22C55E' }}>{stats.comProgramacao}</span><span style={statsGridLabelStyle}>Programados</span></div>
+        <div style={statsGridItemStyle}><span style={{ ...statsGridNumberStyle, color: '#3B82F6' }}>{stats.disponiveis}</span><span style={statsGridLabelStyle}>Disponíveis</span></div>
+        <div style={{ width: '1px', backgroundColor: '#333', margin: '0 8px' }} />
+        <div style={statsGridItemStyle}><span style={{ ...statsGridNumberStyle, color: '#FFD700' }}>{stats.folga}</span><span style={statsGridLabelStyle}>Folga</span></div>
+        <div style={statsGridItemStyle}><span style={{ ...statsGridNumberStyle, color: '#FFD700' }}>{stats.ferias}</span><span style={statsGridLabelStyle}>Férias</span></div>
+        <div style={{ width: '1px', backgroundColor: '#333', margin: '0 8px' }} />
+        <div style={statsGridItemStyle}><span style={{ ...statsGridNumberStyle, color: '#EF4444' }}>{stats.semVeiculo}</span><span style={statsGridLabelStyle}>Sem Veículo</span></div>
+        <div style={statsGridItemStyle}><span style={{ ...statsGridNumberStyle, color: '#FF9500' }}>{stats.veiculoManutencao}</span><span style={statsGridLabelStyle}>Veic. Manut.</span></div>
+        <div style={{ width: '1px', backgroundColor: '#333', margin: '0 8px' }} />
+        <div style={statsGridItemStyle}><span style={{ ...statsGridNumberStyle, color: '#EF4444' }}>{stats.falta}</span><span style={statsGridLabelStyle}>Falta</span></div>
+        <div style={statsGridItemStyle}><span style={{ ...statsGridNumberStyle, color: '#8B5CF6' }}>{stats.atestado}</span><span style={statsGridLabelStyle}>Atestado</span></div>
+        <div style={{ width: '1px', backgroundColor: '#333', margin: '0 8px' }} />
+        <div style={statsGridItemStyle}><span style={{ ...statsGridNumberStyle, color: '#FFD700' }}>{stats.totalViagens}</span><span style={statsGridLabelStyle}>Viagens</span></div>
       </div>
 
       {/* MODAL DE CONFIRMAÇÃO PARA EXCLUIR TODAS AS CARGAS */}
@@ -1432,13 +1601,13 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
                 const carga = cargasPorMotorista[m.id];
                 const temProgramacao = carga !== null && carga !== undefined;
                 const eventoHoje = escalaHojePorMotorista[m.id];
-                const statusInfo = carga ? STATUS_CARGA_MAP[carga.status] : null;
-                const statusMotorista = getStatusMotorista(m, carga, eventoHoje);
+                const statusMotoristaInfo = getStatusMotorista(m, carga, eventoHoje);
+                const statusSalvo = statusSelecionado[m.id];
+                const observacaoTempVal = observacaoTemp[m.id] || '';
                 const checkin = checkinsPorMotorista.get(m.id);
                 const canhotos = carga?.id ? canhotosPorCarga.get(carga.id) : [];
                 const isLoadingCanhotos = carga?.id ? loadingCanhotos.get(carga.id) : false;
                 const escalaInfo = escalaInfoPorMotorista[m.id] || { diasConsecutivosTrabalhados: 0, precisaFolgar: false, porcentagemPresenca: 0 };
-                const isDisponivelParaProgramar = statusMotorista.value === 'disponivel';
                 const placaVeiculo = carga?.placa || '';
                 const veiculoData = veiculos[placaVeiculo];
                 const localizacaoVeiculo = veiculoData?.ultimaLocalizacao || null;
@@ -1447,41 +1616,234 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
                 const ultimaAtualizacao = veiculoData?.ultimaAtualizacaoRastreador;
                 const statusRastreador = veiculoData?.statusRastreador;
                 const ignicao = veiculoData?.ignicao;
-                
                 const rotaMonisat = veiculoData?.rotaMonisat || null;
                 const ultimaAtualizacaoRota = veiculoData?.ultimaAtualizacaoRotaMonisat;
+                const veiculoEmbarcado = getVeiculoEmbarcado(m.nome);
+                const veiculoEmbarcadoData = veiculoEmbarcado?.placa ? veiculos[veiculoEmbarcado.placa] : null;
 
                 return (
-                  <div key={m.id} onClick={(e) => handleCardClick(m, e)} style={cardStyle}>
+                  <div key={m.id} style={cardStyle}>
                     <div style={{ ...fotoWrapperStyle, background: `linear-gradient(135deg, ${getRandomColor(m.id)}, #1a1a1a)` }}>
                       {m.fotoPerfilUrl ? <img src={m.fotoPerfilUrl} alt={m.nome} style={fotoStyle} /> : <div style={initialsStyle}>{getInitials(m.nome)}</div>}
                       <div style={moppBadgeStyle}>{m.temMopp === 'Sim' ? '✅ MOPP' : '❌ Sem MOPP'}</div>
                     </div>
                     <div style={contentStyle}>
-                      <h3 style={nomeStyle}>{m.nome}</h3>
+                      {/* Nome clicável */}
+                      <h3 
+                        style={nomeStyle} 
+                        className="nome-motorista"
+                        onClick={(e) => handleNomeClick(m.id, e)}
+                      >
+                        {m.nome}
+                      </h3>
                       <p style={cpfStyle}>{m.cpf}</p>
-                      <div style={infoEscalaCardStyle}><div style={infoEscalaRowStyle}><span style={infoEscalaLabelStyle}><Clock size={10} style={{ marginRight: '4px' }} /> Dias consecutivos</span><span style={infoEscalaValueStyle}>{escalaInfo.diasConsecutivosTrabalhados}</span></div></div>
+                      <div style={infoEscalaCardStyle}>
+                        <div style={infoEscalaRowStyle}>
+                          <span style={infoEscalaLabelStyle}><Clock size={10} style={{ marginRight: '4px' }} /> Dias consecutivos</span>
+                          <span style={infoEscalaValueStyle}>{escalaInfo.diasConsecutivosTrabalhados}</span>
+                        </div>
+                      </div>
                       <div style={infoGridStyle}>
                         <div style={infoItemStyle}><MapPin size={12} color="#FFD700" /><span><strong>Cidade:</strong> {m.cidade || 'Não informada'}</span></div>
                         <div style={infoItemStyle}><span>📱</span><span><strong>Telefone:</strong> {m.whatsapp || m.telefone || 'Não informado'}</span></div>
                       </div>
-                      <div style={{ ...infoItemStyle, marginBottom: '12px' }}><span>🚛</span><span><strong>Viagens Realizadas:</strong> {m.viagensRealizadas || 0}</span></div>
+                      <div style={{ ...infoItemStyle, marginBottom: '12px' }}>
+                        <span>🚛</span><span><strong>Viagens Realizadas:</strong> {m.viagensRealizadas || 0}</span>
+                      </div>
 
-                      {/* ANOTAÇÕES */}
-                      <div style={anotacaoContainerStyle}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}><span style={{ fontSize: '10px', color: '#FFD700' }}>📝</span><span style={{ fontSize: '10px', fontWeight: 700, color: '#FFD700' }}>ANOTAÇÕES</span></div>
-                        {anotacaoEditando === m.id ? (
+                      {/* VEÍCULO EMBARCADO - Mostra mesmo sem programação */}
+                      {veiculoEmbarcado && (
+                        <>
+                          <div style={monitoriaRowStyle}>
+                            <span style={monitoriaLabelStyle}>🚛 VEÍCULO EMBARCADO:</span>
+                            <span style={{ ...monitoriaValueStyle, color: '#22C55E', fontWeight: 'bold' }}>
+                              {veiculoEmbarcado.placa}
+                              {veiculoEmbarcado.tipo && ` (${veiculoEmbarcado.tipo === 'toco' ? 'Toco' : veiculoEmbarcado.tipo === 'trucado' ? 'Trucado' : 'Truck'})`}
+                            </span>
+                          </div>
+                          
+                          {/* LOCALIZAÇÃO DO VEÍCULO EMBARCADO (mesmo sem programação) */}
+                          {veiculoEmbarcadoData && (
+                            <>
+                              <div style={monitoriaRowStyle}>
+                                <span style={monitoriaLabelStyle}>📡 RASTREADOR:</span>
+                                <span style={{ ...monitoriaValueStyle, color: veiculoEmbarcadoData.statusRastreador === 'online' ? '#22C55E' : '#EF4444' }}>
+                                  {veiculoEmbarcadoData.statusRastreador === 'online' ? '🟢 ONLINE' : '🔴 OFFLINE'}
+                                </span>
+                              </div>
+                              
+                              {veiculoEmbarcadoData.ignicao && (
+                                <div style={monitoriaRowStyle}>
+                                  <span style={monitoriaLabelStyle}>🔑 IGNIÇÃO:</span>
+                                  <span style={{ ...monitoriaValueStyle, color: veiculoEmbarcadoData.ignicao === 'LIGADO' ? '#22C55E' : '#EF4444' }}>
+                                    {veiculoEmbarcadoData.ignicao === 'LIGADO' ? '🟢 LIGADA' : '🔴 DESLIGADA'}
+                                  </span>
+                                </div>
+                              )}
+                              
+                              {veiculoEmbarcadoData.ultimaLocalizacao && veiculoEmbarcadoData.ultimaLocalizacao !== '—' ? (
+                                <div style={monitoriaRowStyle}>
+                                  <span style={monitoriaLabelStyle}>📍 LOCALIZAÇÃO:</span>
+                                  <span style={{ ...monitoriaValueStyle, color: '#22C55E', fontSize: '10px' }}>
+                                    {veiculoEmbarcadoData.ultimaLocalizacao.length > 50 
+                                      ? veiculoEmbarcadoData.ultimaLocalizacao.substring(0, 47) + '...' 
+                                      : veiculoEmbarcadoData.ultimaLocalizacao}
+                                  </span>
+                                </div>
+                              ) : (
+                                <div style={monitoriaRowStyle}>
+                                  <span style={monitoriaLabelStyle}>📍 LOCALIZAÇÃO:</span>
+                                  <span style={{ ...monitoriaValueStyle, color: '#666' }}>Não disponível</span>
+                                </div>
+                              )}
+                              
+                              <div style={monitoriaRowStyle}>
+                                <span style={monitoriaLabelStyle}><Gauge size={10} style={{ display: 'inline', marginRight: '4px' }} /> 🏎️ VELOCIDADE:</span>
+                                <span style={{ 
+                                  ...monitoriaValueStyle, 
+                                  color: getVelocidadeColor(getVelocidade(veiculoEmbarcadoData)), 
+                                  fontWeight: getVelocidade(veiculoEmbarcadoData) > 80 ? 800 : 600 
+                                }}>
+                                  {getVelocidadeIcon(getVelocidade(veiculoEmbarcadoData))} 
+                                  {getVelocidade(veiculoEmbarcadoData) > 0 
+                                    ? `${getVelocidade(veiculoEmbarcadoData)} km/h` 
+                                    : 'Parado'}
+                                  {getVelocidade(veiculoEmbarcadoData) > 80 && (
+                                    <span style={{ marginLeft: '6px', backgroundColor: '#EF4444', color: '#FFF', padding: '2px 6px', borderRadius: '4px', fontSize: '8px', fontWeight: 800 }}>
+                                      EXCESSO!
+                                    </span>
+                                  )}
+                                </span>
+                              </div>
+                              
+                              <div style={monitoriaRowStyle}>
+                                <span style={monitoriaLabelStyle}>🕐 ÚLTIMA ATUALIZAÇÃO:</span>
+                                <span style={{ ...monitoriaValueStyle, color: '#FFD700' }}>
+                                  {formatarUltimaAtualizacao(veiculoEmbarcadoData.ultimaAtualizacaoRastreador)}
+                                </span>
+                              </div>
+                              
+                              {veiculoEmbarcadoData.ultimaMacro && (
+                                <div style={monitoriaRowStyle}>
+                                  <span style={monitoriaLabelStyle}>🏷️ ÚLTIMA MACRO:</span>
+                                  <span style={{ ...monitoriaValueStyle, color: '#FFD700' }}>
+                                    {veiculoEmbarcadoData.ultimaMacro}
+                                  </span>
+                                </div>
+                              )}
+                              
+                              {/* ROTA MONISAT do veículo embarcado */}
+                              {veiculoEmbarcadoData.rotaMonisat && (
+                                <>
+                                  <div style={{ ...monitoriaRowStyle, borderTop: '1px solid #2A2A2A', marginTop: '4px', paddingTop: '8px' }}>
+                                    <span style={monitoriaLabelStyle}><Route size={10} style={{ display: 'inline', marginRight: '4px' }} /> 🛣️ ROTA MONISAT:</span>
+                                    <span className="rota-text" style={{ ...monitoriaValueStyle, color: '#FFD700', fontSize: '10px', maxWidth: '70%', textAlign: 'right' }}>
+                                      {veiculoEmbarcadoData.rotaMonisat}
+                                    </span>
+                                  </div>
+                                  {veiculoEmbarcadoData.ultimaAtualizacaoRotaMonisat && (
+                                    <div style={monitoriaRowStyle}>
+                                      <span style={monitoriaLabelStyle}>🕐 ATUALIZAÇÃO ROTA:</span>
+                                      <span style={{ ...monitoriaValueStyle, color: '#888', fontSize: '9px' }}>
+                                        {formatarUltimaAtualizacaoRota(veiculoEmbarcadoData.ultimaAtualizacaoRotaMonisat)}
+                                      </span>
+                                    </div>
+                                  )}
+                                </>
+                              )}
+                            </>
+                          )}
+                        </>
+                      )}
+
+                      {/* STATUS DO MOTORISTA (para filtro sem programação) */}
+                      {!temProgramacao && (
+                        <div 
+                          style={statusCardStyle(statusMotoristaInfo.bg, statusMotoristaInfo.cor)}
+                          onClick={() => setStatusMotoristaEditando(m.id)}
+                        >
+                          {statusMotoristaEditando === m.id ? (
+                            <>
+                              <select 
+                                style={statusSelectStyle}
+                                value={statusSalvo || statusMotoristaInfo.value}
+                                onChange={(e) => salvarStatusMotorista(m.id, e.target.value)}
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <option value="disponivel">✅ Disponível para Programar</option>
+                                <option value="folga">😴 Folga</option>
+                                <option value="ferias">🏖️ Férias</option>
+                                <option value="sem_veiculo">🚫 Sem Veículo</option>
+                                <option value="falta">❌ Falta</option>
+                                <option value="atestado">📋 Atestado</option>
+                                <option value="veiculo_manutencao">🔧 Veículo em Manutenção</option>
+                              </select>
+                              <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+                                <button 
+                                  style={{ ...smallButtonStyle, backgroundColor: '#22C55E', color: '#000' }} 
+                                  onClick={(e) => { e.stopPropagation(); const select = e.currentTarget.parentElement?.querySelector('select'); if (select) salvarStatusMotorista(m.id, select.value); }}
+                                >
+                                  <Save size={10} /> Salvar
+                                </button>
+                                <button 
+                                  style={{ ...smallButtonStyle, backgroundColor: '#EF4444', color: '#FFF' }} 
+                                  onClick={(e) => { e.stopPropagation(); setStatusMotoristaEditando(null); }}
+                                >
+                                  Cancelar
+                                </button>
+                              </div>
+                            </>
+                          ) : (
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                              <div>
+                                <span style={{ fontSize: '20px', marginRight: '8px' }}>{statusMotoristaInfo.icon}</span>
+                                <span style={{ fontWeight: 700, color: statusMotoristaInfo.cor, fontSize: '14px' }}>{statusMotoristaInfo.label}</span>
+                              </div>
+                              <Edit3 size={14} style={{ color: '#888' }} />
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* OBSERVAÇÃO */}
+                      <div style={observacaoContainerStyle}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                          <span style={{ fontSize: '10px', color: '#FFD700' }}>📝</span>
+                          <span style={{ fontSize: '10px', fontWeight: 700, color: '#FFD700' }}>OBSERVAÇÃO</span>
+                        </div>
+                        {observacaoEditando === m.id ? (
                           <div>
-                            <textarea style={anotacaoInputStyle} rows={3} placeholder="Ex: motorista com restrição médica, aguardando documentação..." defaultValue={anotacoesMotoristas[m.id] || ''} id={`anotacao_${m.id}`} />
+                            <textarea 
+                              style={observacaoTextareaStyle} 
+                              rows={3} 
+                              placeholder="Digite uma observação sobre o motorista..." 
+                              defaultValue={observacaoTempVal || ''} 
+                              id={`obs_${m.id}`} 
+                            />
                             <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
-                              <button style={{ ...smallButtonStyle, backgroundColor: '#22C55E', color: '#000' }} onClick={(e) => { e.stopPropagation(); const textarea = document.getElementById(`anotacao_${m.id}`) as HTMLTextAreaElement; if (textarea) salvarAnotacao(m.id, textarea.value); }}><Save size={10} /> Salvar</button>
-                              <button style={{ ...smallButtonStyle, backgroundColor: '#EF4444', color: '#FFF' }} onClick={(e) => { e.stopPropagation(); setAnotacaoEditando(null); }}>Cancelar</button>
+                              <button 
+                                style={{ ...smallButtonStyle, backgroundColor: '#22C55E', color: '#000' }} 
+                                onClick={(e) => { e.stopPropagation(); const textarea = document.getElementById(`obs_${m.id}`) as HTMLTextAreaElement; if (textarea) salvarObservacaoTemp(m.id, textarea.value); }}
+                              >
+                                <Save size={10} /> Salvar
+                              </button>
+                              <button 
+                                style={{ ...smallButtonStyle, backgroundColor: '#EF4444', color: '#FFF' }} 
+                                onClick={(e) => { e.stopPropagation(); setObservacaoEditando(null); }}
+                              >
+                                Cancelar
+                              </button>
                             </div>
                           </div>
                         ) : (
                           <div>
-                            <p style={anotacaoTextStyle}>{anotacoesMotoristas[m.id] || 'Nenhuma anotação cadastrada'}</p>
-                            <button style={{ ...smallButtonStyle, backgroundColor: '#FFD70020', color: '#FFD700', border: '1px solid #FFD700' }} onClick={(e) => { e.stopPropagation(); setAnotacaoEditando(m.id); }}><Edit3 size={10} /> {anotacoesMotoristas[m.id] ? 'Editar Anotação' : 'Adicionar Anotação'}</button>
+                            <p style={observacaoTextStyle}>{observacaoTempVal || 'Nenhuma observação cadastrada'}</p>
+                            <button 
+                              style={{ ...smallButtonStyle, backgroundColor: '#FFD70020', color: '#FFD700', border: '1px solid #FFD700' }} 
+                              onClick={(e) => { e.stopPropagation(); setObservacaoEditando(m.id); }}
+                            >
+                              <Edit3 size={10} /> {observacaoTempVal ? 'Editar Observação' : 'Adicionar Observação'}
+                            </button>
                           </div>
                         )}
                       </div>
@@ -1490,75 +1852,249 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
                       {temProgramacao && carga && (
                         <>
                           <div style={programacaoContainerStyle}>
-                            <div style={programacaoHeaderStyle}><Truck size={14} color="#888" /><h4 style={programacaoTitleStyle}>Programação Atual</h4>{statusInfo && <span style={programacaoStatusStyle(statusInfo.cor, statusInfo.bg)}>{statusInfo.icon} {statusInfo.label}</span>}</div>
-                            <div style={programacaoInfoStyle}><strong style={{ color: '#FFD700' }}>DT:</strong> {carga.dt || '—'}</div>
-                            <div style={{ ...programacaoInfoStyle, marginTop: '4px' }}><MapPin size={12} color="#FFD700" /><span><strong>Coleta:</strong> {carga.coletaCidade} - {carga.coletaLocal}</span></div>
-                            <div style={programacaoInfoStyle}><Calendar size={12} color="#FFD700" /><span>{carga.coletaData || '—'}</span></div>
-                            <div style={{ ...programacaoInfoStyle, marginTop: '4px' }}><MapPin size={12} color="#22C55E" /><span><strong>Entrega:</strong> {carga.entregaCidade} - {carga.entregaLocal}</span></div>
-                            <div style={programacaoInfoStyle}><Calendar size={12} color="#22C55E" /><span>{carga.entregaData || '—'}</span></div>
-                            <div style={{ ...programacaoInfoStyle, marginTop: '8px', borderTop: '1px solid #1F1F1F', paddingTop: '8px' }}><Truck size={12} color="#888" /><span><strong>Placa Cavalo:</strong> <span style={programacaoPlacaStyle}>{carga.placa || '—'}</span></span></div>
-                            {carga.carreta && <div style={programacaoInfoStyle}><Truck size={12} color="#888" /><span><strong>Placa Carreta:</strong> <span style={programacaoPlacaStyle}>{carga.carreta}</span></span></div>}
-                            <div style={programacaoInfoStyle}><strong>Peso:</strong> {carga.peso || '—'} kg</div>
-                          </div>
-
-                          {/* MONITORAMENTO */}
-                          <div style={monitoriaCardStyle}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}><Activity size={12} color="#FFD700" /><span style={{ fontSize: '10px', fontWeight: 700, color: '#FFD700' }}>MONITORAMENTO</span></div>
-                            <div style={monitoriaRowStyle}><span style={monitoriaLabelStyle}>📡 RASTREADOR:</span><span style={{ ...monitoriaValueStyle, color: statusRastreador === 'online' ? '#22C55E' : '#EF4444' }}>{statusRastreador === 'online' ? '🟢 ONLINE' : '🔴 OFFLINE'}</span></div>
-                            {ignicao && <div style={monitoriaRowStyle}><span style={monitoriaLabelStyle}>🔑 IGNIÇÃO:</span><span style={{ ...monitoriaValueStyle, color: ignicao === 'LIGADO' ? '#22C55E' : '#EF4444' }}>{ignicao === 'LIGADO' ? '🟢 LIGADA' : '🔴 DESLIGADA'}</span></div>}
-                            {localizacaoVeiculo && localizacaoVeiculo !== '—' ? (<div style={monitoriaRowStyle}><span style={monitoriaLabelStyle}>📍 LOCALIZAÇÃO:</span><span style={{ ...monitoriaValueStyle, color: '#22C55E', fontSize: '10px' }}>{localizacaoVeiculo.length > 50 ? localizacaoVeiculo.substring(0, 47) + '...' : localizacaoVeiculo}</span></div>) : <div style={monitoriaRowStyle}><span style={monitoriaLabelStyle}>📍 LOCALIZAÇÃO:</span><span style={{ ...monitoriaValueStyle, color: '#666' }}>Não disponível</span></div>}
-                            <div style={monitoriaRowStyle}><span style={monitoriaLabelStyle}><Gauge size={10} style={{ display: 'inline', marginRight: '4px' }} /> 🏎️ VELOCIDADE:</span><span style={{ ...monitoriaValueStyle, color: getVelocidadeColor(velocidadeVeiculo), fontWeight: velocidadeVeiculo > 80 ? 800 : 600, fontSize: velocidadeVeiculo > 80 ? '13px' : '11px' }}>{getVelocidadeIcon(velocidadeVeiculo)} {velocidadeVeiculo > 0 ? `${velocidadeVeiculo} km/h` : 'Parado'}{velocidadeVeiculo > 80 && <span style={{ marginLeft: '6px', backgroundColor: '#EF4444', color: '#FFF', padding: '2px 6px', borderRadius: '4px', fontSize: '8px', fontWeight: 800 }}>EXCESSO!</span>}</span></div>
-                            <div style={monitoriaRowStyle}><span style={monitoriaLabelStyle}>🕐 ÚLTIMA ATUALIZAÇÃO:</span><span style={{ ...monitoriaValueStyle, color: '#FFD700' }}>{formatarUltimaAtualizacao(ultimaAtualizacao)}</span></div>
-                            {veiculoData?.ultimaMacro && <div style={monitoriaRowStyle}><span style={monitoriaLabelStyle}>🏷️ ÚLTIMA MACRO:</span><span style={{ ...monitoriaValueStyle, color: '#FFD700' }}>{veiculoData.ultimaMacro}</span></div>}
-                            
-                            {rotaMonisat && (
-                              <>
-                                <div style={{ ...monitoriaRowStyle, borderTop: '1px solid #2A2A2A', marginTop: '4px', paddingTop: '8px' }}>
-                                  <span style={monitoriaLabelStyle}><Route size={10} style={{ display: 'inline', marginRight: '4px' }} /> 🛣️ ROTA MONISAT:</span>
-                                  <span className="rota-text" style={{ ...monitoriaValueStyle, color: '#FFD700', fontSize: '10px', maxWidth: '70%', textAlign: 'right' }}>
-                                    {rotaMonisat}
-                                  </span>
-                                </div>
-                                {ultimaAtualizacaoRota && (
-                                  <div style={monitoriaRowStyle}>
-                                    <span style={monitoriaLabelStyle}>🕐 ATUALIZAÇÃO ROTA:</span>
-                                    <span style={{ ...monitoriaValueStyle, color: '#888', fontSize: '9px' }}>
-                                      {formatarUltimaAtualizacaoRota(ultimaAtualizacaoRota)}
-                                    </span>
-                                  </div>
-                                )}
-                              </>
+                            <div style={programacaoHeaderStyle}>
+                              <Truck size={14} color="#888" />
+                              <h4 style={programacaoTitleStyle}>Programação Atual</h4>
+                              {STATUS_CARGA_MAP[carga.status] && (
+                                <span style={programacaoStatusStyle(STATUS_CARGA_MAP[carga.status].cor, STATUS_CARGA_MAP[carga.status].bg)}>
+                                  {STATUS_CARGA_MAP[carga.status].icon} {STATUS_CARGA_MAP[carga.status].label}
+                                </span>
+                              )}
+                            </div>
+                            <div style={programacaoInfoStyle}>
+                              <strong style={{ color: '#FFD700' }}>DT:</strong> {carga.dt || '—'}
+                            </div>
+                            <div style={{ ...programacaoInfoStyle, marginTop: '4px' }}>
+                              <MapPin size={12} color="#FFD700" />
+                              <span><strong>Coleta:</strong> {carga.coletaCidade} - {carga.coletaLocal}</span>
+                            </div>
+                            <div style={programacaoInfoStyle}>
+                              <Calendar size={12} color="#FFD700" />
+                              <span>{carga.coletaData || '—'}</span>
+                            </div>
+                            <div style={{ ...programacaoInfoStyle, marginTop: '4px' }}>
+                              <MapPin size={12} color="#22C55E" />
+                              <span><strong>Entrega:</strong> {carga.entregaCidade} - {carga.entregaLocal}</span>
+                            </div>
+                            <div style={programacaoInfoStyle}>
+                              <Calendar size={12} color="#22C55E" />
+                              <span>{carga.entregaData || '—'}</span>
+                            </div>
+                            <div style={{ ...programacaoInfoStyle, marginTop: '8px', borderTop: '1px solid #1F1F1F', paddingTop: '8px' }}>
+                              <Truck size={12} color="#888" />
+                              <span><strong>Placa Cavalo:</strong> <span style={programacaoPlacaStyle}>{carga.placa || '—'}</span></span>
+                            </div>
+                            {carga.carreta && (
+                              <div style={programacaoInfoStyle}>
+                                <Truck size={12} color="#888" />
+                                <span><strong>Placa Carreta:</strong> <span style={programacaoPlacaStyle}>{carga.carreta}</span></span>
+                              </div>
                             )}
-                            
-                            <div style={monitoriaRowStyle}><span style={monitoriaLabelStyle}>📋 CHECK-IN:</span><span style={{ ...monitoriaValueStyle, color: checkin?.tipo ? '#22C55E' : '#EF4444' }}>{checkin?.tipo ? getCheckinLabel(checkin.tipo) : 'Aguardando check-in'}</span></div>
-                            {checkin?.dataHora && <div style={monitoriaRowStyle}><span style={monitoriaLabelStyle}>⏰ DATA/HORA:</span><span style={monitoriaValueStyle}>{checkin.dataHora}</span></div>}
-                            {checkin?.pontualidade && <div style={monitoriaRowStyle}><span style={monitoriaLabelStyle}>⏱️ PONTUALIDADE:</span><span style={{ ...monitoriaValueStyle, color: checkin.pontualidade === 'On Time' ? '#22C55E' : '#EF4444' }}>{checkin.pontualidade}</span></div>}
-                            {checkin?.localizacaoReal && <div style={monitoriaRowStyle}><span style={monitoriaLabelStyle}>📍 LOCALIZAÇÃO CHECK-IN:</span><span style={monitoriaValueStyle}>{checkin.localizacaoReal}</span></div>}
-                            <div style={buttonGroupStyle}>
-                              {checkin?.fotoUrl && <button style={{ ...smallButtonStyle, backgroundColor: '#3B82F620', color: '#3B82F6', border: '1px solid #3B82F6' }} onClick={(e) => { e.stopPropagation(); setSelectedPhoto(checkin.fotoUrl!); setShowPhotoModal(true); }}><Camera size={12} /> Ver Foto Check-in</button>}
-                              {canhotos && canhotos.length > 0 && <button style={{ ...smallButtonStyle, backgroundColor: '#FFD70020', color: '#FFD700', border: '1px solid #FFD700' }} onClick={(e) => { e.stopPropagation(); setCanhotosModalData({ canhotos, cargaNome: m.nome }); setShowCanhotosModal(true); }}><Printer size={12} /> Ver {canhotos.length} Canhoto(s)</button>}
-                              {isLoadingCanhotos && <span style={{ fontSize: '10px', color: '#AAA' }}>Carregando...</span>}
+                            <div style={programacaoInfoStyle}>
+                              <strong>Peso:</strong> {carga.peso || '—'} kg
                             </div>
                           </div>
 
+                          {/* MONITORAMENTO - Só mostra se NÃO tiver veículo embarcado já mostrando */}
+                          {!veiculoEmbarcado && (
+                            <div style={monitoriaCardStyle}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+                                <Activity size={12} color="#FFD700" />
+                                <span style={{ fontSize: '10px', fontWeight: 700, color: '#FFD700' }}>MONITORAMENTO</span>
+                              </div>
+                              <div style={monitoriaRowStyle}>
+                                <span style={monitoriaLabelStyle}>📡 RASTREADOR:</span>
+                                <span style={{ ...monitoriaValueStyle, color: statusRastreador === 'online' ? '#22C55E' : '#EF4444' }}>
+                                  {statusRastreador === 'online' ? '🟢 ONLINE' : '🔴 OFFLINE'}
+                                </span>
+                              </div>
+                              {ignicao && (
+                                <div style={monitoriaRowStyle}>
+                                  <span style={monitoriaLabelStyle}>🔑 IGNIÇÃO:</span>
+                                  <span style={{ ...monitoriaValueStyle, color: ignicao === 'LIGADO' ? '#22C55E' : '#EF4444' }}>
+                                    {ignicao === 'LIGADO' ? '🟢 LIGADA' : '🔴 DESLIGADA'}
+                                  </span>
+                                </div>
+                              )}
+                              {localizacaoVeiculo && localizacaoVeiculo !== '—' ? (
+                                <div style={monitoriaRowStyle}>
+                                  <span style={monitoriaLabelStyle}>📍 LOCALIZAÇÃO:</span>
+                                  <span style={{ ...monitoriaValueStyle, color: '#22C55E', fontSize: '10px' }}>
+                                    {localizacaoVeiculo.length > 50 ? localizacaoVeiculo.substring(0, 47) + '...' : localizacaoVeiculo}
+                                  </span>
+                                </div>
+                              ) : (
+                                <div style={monitoriaRowStyle}>
+                                  <span style={monitoriaLabelStyle}>📍 LOCALIZAÇÃO:</span>
+                                  <span style={{ ...monitoriaValueStyle, color: '#666' }}>Não disponível</span>
+                                </div>
+                              )}
+                              <div style={monitoriaRowStyle}>
+                                <span style={monitoriaLabelStyle}><Gauge size={10} style={{ display: 'inline', marginRight: '4px' }} /> 🏎️ VELOCIDADE:</span>
+                                <span style={{ ...monitoriaValueStyle, color: getVelocidadeColor(velocidadeVeiculo), fontWeight: velocidadeVeiculo > 80 ? 800 : 600 }}>
+                                  {getVelocidadeIcon(velocidadeVeiculo)} {velocidadeVeiculo > 0 ? `${velocidadeVeiculo} km/h` : 'Parado'}
+                                  {velocidadeVeiculo > 80 && (
+                                    <span style={{ marginLeft: '6px', backgroundColor: '#EF4444', color: '#FFF', padding: '2px 6px', borderRadius: '4px', fontSize: '8px', fontWeight: 800 }}>
+                                      EXCESSO!
+                                    </span>
+                                  )}
+                                </span>
+                              </div>
+                              <div style={monitoriaRowStyle}>
+                                <span style={monitoriaLabelStyle}>🕐 ÚLTIMA ATUALIZAÇÃO:</span>
+                                <span style={{ ...monitoriaValueStyle, color: '#FFD700' }}>
+                                  {formatarUltimaAtualizacao(ultimaAtualizacao)}
+                                </span>
+                              </div>
+                              {veiculoData?.ultimaMacro && (
+                                <div style={monitoriaRowStyle}>
+                                  <span style={monitoriaLabelStyle}>🏷️ ÚLTIMA MACRO:</span>
+                                  <span style={{ ...monitoriaValueStyle, color: '#FFD700' }}>
+                                    {veiculoData.ultimaMacro}
+                                  </span>
+                                </div>
+                              )}
+                              {rotaMonisat && (
+                                <>
+                                  <div style={{ ...monitoriaRowStyle, borderTop: '1px solid #2A2A2A', marginTop: '4px', paddingTop: '8px' }}>
+                                    <span style={monitoriaLabelStyle}><Route size={10} style={{ display: 'inline', marginRight: '4px' }} /> 🛣️ ROTA MONISAT:</span>
+                                    <span className="rota-text" style={{ ...monitoriaValueStyle, color: '#FFD700', fontSize: '10px', maxWidth: '70%', textAlign: 'right' }}>
+                                      {rotaMonisat}
+                                    </span>
+                                  </div>
+                                  {ultimaAtualizacaoRota && (
+                                    <div style={monitoriaRowStyle}>
+                                      <span style={monitoriaLabelStyle}>🕐 ATUALIZAÇÃO ROTA:</span>
+                                      <span style={{ ...monitoriaValueStyle, color: '#888', fontSize: '9px' }}>
+                                        {formatarUltimaAtualizacaoRota(ultimaAtualizacaoRota)}
+                                      </span>
+                                    </div>
+                                  )}
+                                </>
+                              )}
+                              <div style={monitoriaRowStyle}>
+                                <span style={monitoriaLabelStyle}>📋 CHECK-IN:</span>
+                                <span style={{ ...monitoriaValueStyle, color: checkin?.tipo ? '#22C55E' : '#EF4444' }}>
+                                  {checkin?.tipo ? getCheckinLabel(checkin.tipo) : 'Aguardando check-in'}
+                                </span>
+                              </div>
+                              {checkin?.dataHora && (
+                                <div style={monitoriaRowStyle}>
+                                  <span style={monitoriaLabelStyle}>⏰ DATA/HORA:</span>
+                                  <span style={monitoriaValueStyle}>{checkin.dataHora}</span>
+                                </div>
+                              )}
+                              {checkin?.pontualidade && (
+                                <div style={monitoriaRowStyle}>
+                                  <span style={monitoriaLabelStyle}>⏱️ PONTUALIDADE:</span>
+                                  <span style={{ ...monitoriaValueStyle, color: checkin.pontualidade === 'On Time' ? '#22C55E' : '#EF4444' }}>
+                                    {checkin.pontualidade}
+                                  </span>
+                                </div>
+                              )}
+                              {checkin?.localizacaoReal && (
+                                <div style={monitoriaRowStyle}>
+                                  <span style={monitoriaLabelStyle}>📍 LOCALIZAÇÃO CHECK-IN:</span>
+                                  <span style={monitoriaValueStyle}>{checkin.localizacaoReal}</span>
+                                </div>
+                              )}
+                              <div style={buttonGroupStyle}>
+                                {checkin?.fotoUrl && (
+                                  <button 
+                                    style={{ ...smallButtonStyle, backgroundColor: '#3B82F620', color: '#3B82F6', border: '1px solid #3B82F6' }} 
+                                    onClick={(e) => { e.stopPropagation(); setSelectedPhoto(checkin.fotoUrl!); setShowPhotoModal(true); }}>
+                                    <Camera size={12} /> Ver Foto Check-in
+                                  </button>
+                                )}
+                                {canhotos && canhotos.length > 0 && (
+                                  <button 
+                                    style={{ ...smallButtonStyle, backgroundColor: '#FFD70020', color: '#FFD700', border: '1px solid #FFD700' }} 
+                                    onClick={(e) => { e.stopPropagation(); setCanhotosModalData({ canhotos, cargaNome: m.nome }); setShowCanhotosModal(true); }}>
+                                    <Printer size={12} /> Ver {canhotos.length} Canhoto(s)
+                                  </button>
+                                )}
+                                {isLoadingCanhotos && <span style={{ fontSize: '10px', color: '#AAA' }}>Carregando...</span>}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Se tem veículo embarcado, mostrar apenas CHECK-IN e AÇÕES (sem repetir rastreador/localização/etc) */}
+                          {veiculoEmbarcado && (
+                            <div style={monitoriaCardStyle}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+                                <Activity size={12} color="#FFD700" />
+                                <span style={{ fontSize: '10px', fontWeight: 700, color: '#FFD700' }}>CHECK-IN</span>
+                              </div>
+                              <div style={monitoriaRowStyle}>
+                                <span style={monitoriaLabelStyle}>📋 CHECK-IN:</span>
+                                <span style={{ ...monitoriaValueStyle, color: checkin?.tipo ? '#22C55E' : '#EF4444' }}>
+                                  {checkin?.tipo ? getCheckinLabel(checkin.tipo) : 'Aguardando check-in'}
+                                </span>
+                              </div>
+                              {checkin?.dataHora && (
+                                <div style={monitoriaRowStyle}>
+                                  <span style={monitoriaLabelStyle}>⏰ DATA/HORA:</span>
+                                  <span style={monitoriaValueStyle}>{checkin.dataHora}</span>
+                                </div>
+                              )}
+                              {checkin?.pontualidade && (
+                                <div style={monitoriaRowStyle}>
+                                  <span style={monitoriaLabelStyle}>⏱️ PONTUALIDADE:</span>
+                                  <span style={{ ...monitoriaValueStyle, color: checkin.pontualidade === 'On Time' ? '#22C55E' : '#EF4444' }}>
+                                    {checkin.pontualidade}
+                                  </span>
+                                </div>
+                              )}
+                              {checkin?.localizacaoReal && (
+                                <div style={monitoriaRowStyle}>
+                                  <span style={monitoriaLabelStyle}>📍 LOCALIZAÇÃO CHECK-IN:</span>
+                                  <span style={monitoriaValueStyle}>{checkin.localizacaoReal}</span>
+                                </div>
+                              )}
+                              <div style={buttonGroupStyle}>
+                                {checkin?.fotoUrl && (
+                                  <button 
+                                    style={{ ...smallButtonStyle, backgroundColor: '#3B82F620', color: '#3B82F6', border: '1px solid #3B82F6' }} 
+                                    onClick={(e) => { e.stopPropagation(); setSelectedPhoto(checkin.fotoUrl!); setShowPhotoModal(true); }}>
+                                    <Camera size={12} /> Ver Foto Check-in
+                                  </button>
+                                )}
+                                {canhotos && canhotos.length > 0 && (
+                                  <button 
+                                    style={{ ...smallButtonStyle, backgroundColor: '#FFD70020', color: '#FFD700', border: '1px solid #FFD700' }} 
+                                    onClick={(e) => { e.stopPropagation(); setCanhotosModalData({ canhotos, cargaNome: m.nome }); setShowCanhotosModal(true); }}>
+                                    <Printer size={12} /> Ver {canhotos.length} Canhoto(s)
+                                  </button>
+                                )}
+                                {isLoadingCanhotos && <span style={{ fontSize: '10px', color: '#AAA' }}>Carregando...</span>}
+                              </div>
+                            </div>
+                          )}
+
                           {/* AÇÕES DA CARGA */}
                           <div style={actionButtonsStyle}>
-                            <button style={{ ...actionButtonStyle, backgroundColor: '#3B82F620', color: '#3B82F6', borderColor: '#3B82F6' }} onClick={(e) => { e.stopPropagation(); if (carga) { setEditandoCarga(carga); setShowEditCargaModal(true); } }}><Edit3 size={14} /> Editar Carga</button>
-                            <button style={{ ...actionButtonStyle, backgroundColor: '#EF444420', color: '#EF4444', borderColor: '#EF4444' }} onClick={(e) => { e.stopPropagation(); if (carga) { handleExcluirCarga(carga); } }}><Trash2 size={14} /> Excluir Carga</button>
-                            <button style={{ ...actionButtonStyle, backgroundColor: '#22C55E20', color: '#22C55E', borderColor: '#22C55E' }} onClick={(e) => { e.stopPropagation(); if (carga) { setSelectedCargaForStatus(carga); setNewStatus(carga.status); setShowStatusModal(true); } }}><RotateCcw size={14} /> Alterar Status</button>
-                            <button style={{ ...actionButtonStyle, backgroundColor: '#FFD70020', color: '#FFD700', borderColor: '#FFD700' }} onClick={(e) => { e.stopPropagation(); if (carga) { handleFinalizarCarga(carga); } }}><Flag size={14} /> Finalizar Carga</button>
+                            <button 
+                              style={{ ...actionButtonStyle, backgroundColor: '#3B82F620', color: '#3B82F6', borderColor: '#3B82F6' }} 
+                              onClick={(e) => { e.stopPropagation(); if (carga) { setEditandoCarga(carga); setShowEditCargaModal(true); } }}>
+                              <Edit3 size={14} /> Editar Carga
+                            </button>
+                            <button 
+                              style={{ ...actionButtonStyle, backgroundColor: '#EF444420', color: '#EF4444', borderColor: '#EF4444' }} 
+                              onClick={(e) => { e.stopPropagation(); if (carga) { handleExcluirCarga(carga); } }}>
+                              <Trash2 size={14} /> Excluir Carga
+                            </button>
+                            <button 
+                              style={{ ...actionButtonStyle, backgroundColor: '#22C55E20', color: '#22C55E', borderColor: '#22C55E' }} 
+                              onClick={(e) => { e.stopPropagation(); if (carga) { setSelectedCargaForStatus(carga); setNewStatus(carga.status); setShowStatusModal(true); } }}>
+                              <RotateCcw size={14} /> Alterar Status
+                            </button>
+                            <button 
+                              style={{ ...actionButtonStyle, backgroundColor: '#FFD70020', color: '#FFD700', borderColor: '#FFD700' }} 
+                              onClick={(e) => { e.stopPropagation(); if (carga) { handleFinalizarCarga(carga); } }}>
+                              <Flag size={14} /> Finalizar Carga
+                            </button>
                           </div>
                         </>
-                      )}
-
-                      {/* STATUS QUANDO SEM PROGRAMAÇÃO */}
-                      {!temProgramacao && (
-                        <div style={{ padding: '12px', borderRadius: '12px', marginBottom: '16px', textAlign: 'center', backgroundColor: statusMotorista.bg, border: `1px solid ${statusMotorista.cor}` }}>
-                          <span style={{ fontSize: '24px', marginRight: '8px' }}>{statusMotorista.icon}</span>
-                          <span style={{ fontWeight: 700, color: statusMotorista.cor, fontSize: '14px' }}>{statusMotorista.label}</span>
-                          {statusMotorista.value === 'folga' && <div style={{ fontSize: '11px', color: '#888', marginTop: '4px' }}>{eventoHoje?.tipo === 'Descanso Semanal' ? 'Descanso semanal - Não programar' : 'Férias - Não programar'}</div>}
-                          {isDisponivelParaProgramar && !carga && <div style={{ fontSize: '11px', color: '#22C55E', marginTop: '4px' }}>✅ Motorista está disponível para nova programação</div>}
-                        </div>
                       )}
 
                       {/* BOTÕES DE AÇÃO DO MOTORISTA */}
@@ -1573,9 +2109,47 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
                           <MessageCircle size={14} /> Conversar / Histórico
                         </button>
                         
-                        <button style={actionButtonStyle} onClick={() => onSelectMotorista(m.id)}><UserCheck size={14} /> Ver Detalhes</button>
-                        <button style={{ ...actionButtonStyle, backgroundColor: '#EF444420', color: '#EF4444', borderColor: '#EF4444' }} onClick={() => setShowDeleteConfirm(m.id)}><UserMinus size={14} /> Excluir</button>
-                        <button onClick={() => { setMapaModalMotorista({ id: m.id, nome: m.nome, placa: placaVeiculo || undefined, veiculoId: carga?.veiculo || undefined, coordenadas: coordenadasVeiculo || undefined, ultimaLocalizacao: localizacaoVeiculo || veiculoData?.ultimaLocalizacao || undefined, ultimoEndereco: localizacaoVeiculo || veiculoData?.ultimaLocalizacao || undefined, ultimaAtualizacao: veiculoData?.ultimaAtualizacaoRastreador, status: veiculoData?.statusRastreador, ultimaMacro: veiculoData?.ultimaMacro || undefined, rotaMonisat: rotaMonisat || undefined }); }} style={{ ...actionButtonStyle, backgroundColor: coordenadasVeiculo?.lat && coordenadasVeiculo?.lng ? '#3B82F6' : '#555', color: '#FFF', borderColor: coordenadasVeiculo?.lat && coordenadasVeiculo?.lng ? '#3B82F6' : '#555', opacity: coordenadasVeiculo?.lat && coordenadasVeiculo?.lng ? 1 : 0.5 }} disabled={!coordenadasVeiculo?.lat || !coordenadasVeiculo?.lng} title={!coordenadasVeiculo?.lat || !coordenadasVeiculo?.lng ? 'Coordenadas não disponíveis' : 'Ver no mapa'}><Navigation size={14} /> Ver Localização</button>
+                        <button 
+                          style={actionButtonStyle} 
+                          onClick={(e) => handleVerDetalhes(m.id, e)}
+                        >
+                          <UserCheck size={14} /> Ver Detalhes
+                        </button>
+                        
+                        <button 
+                          style={{ ...actionButtonStyle, backgroundColor: '#EF444420', color: '#EF4444', borderColor: '#EF4444' }} 
+                          onClick={(e) => { e.stopPropagation(); setShowDeleteConfirm(m.id); }}>
+                          <UserMinus size={14} /> Excluir
+                        </button>
+                        
+                        <button 
+                          onClick={(e) => { 
+                            e.stopPropagation(); 
+                            setMapaModalMotorista({ 
+                              id: m.id, 
+                              nome: m.nome, 
+                              placa: placaVeiculo || veiculoEmbarcado?.placa || undefined, 
+                              veiculoId: carga?.veiculo || undefined, 
+                              coordenadas: coordenadasVeiculo || veiculoEmbarcadoData?.coordenadas || undefined, 
+                              ultimaLocalizacao: localizacaoVeiculo || veiculoEmbarcadoData?.ultimaLocalizacao || undefined, 
+                              ultimoEndereco: localizacaoVeiculo || veiculoEmbarcadoData?.ultimaLocalizacao || undefined, 
+                              ultimaAtualizacao: ultimaAtualizacao || veiculoEmbarcadoData?.ultimaAtualizacaoRastreador, 
+                              status: statusRastreador || veiculoEmbarcadoData?.statusRastreador, 
+                              ultimaMacro: veiculoData?.ultimaMacro || veiculoEmbarcadoData?.ultimaMacro || undefined, 
+                              rotaMonisat: rotaMonisat || veiculoEmbarcadoData?.rotaMonisat || undefined 
+                            }); 
+                          }} 
+                          style={{ 
+                            ...actionButtonStyle, 
+                            backgroundColor: (coordenadasVeiculo?.lat && coordenadasVeiculo?.lng) || (veiculoEmbarcadoData?.coordenadas?.lat && veiculoEmbarcadoData?.coordenadas?.lng) ? '#3B82F6' : '#555', 
+                            color: '#FFF', 
+                            borderColor: (coordenadasVeiculo?.lat && coordenadasVeiculo?.lng) || (veiculoEmbarcadoData?.coordenadas?.lat && veiculoEmbarcadoData?.coordenadas?.lng) ? '#3B82F6' : '#555', 
+                            opacity: (coordenadasVeiculo?.lat && coordenadasVeiculo?.lng) || (veiculoEmbarcadoData?.coordenadas?.lat && veiculoEmbarcadoData?.coordenadas?.lng) ? 1 : 0.5 
+                          }} 
+                          disabled={!((coordenadasVeiculo?.lat && coordenadasVeiculo?.lng) || (veiculoEmbarcadoData?.coordenadas?.lat && veiculoEmbarcadoData?.coordenadas?.lng))} 
+                          title={!((coordenadasVeiculo?.lat && coordenadasVeiculo?.lng) || (veiculoEmbarcadoData?.coordenadas?.lat && veiculoEmbarcadoData?.coordenadas?.lng)) ? 'Coordenadas não disponíveis' : 'Ver no mapa'}>
+                            <Navigation size={14} /> Ver Localização
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -1595,11 +2169,14 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
         />
       )}
 
-      {/* MODAIS - EDITAR CARGA, ALTERAR STATUS, EXCLUIR, FOTO, CANHOTOS, MAPA */}
+      {/* MODAIS */}
       {showEditCargaModal && editandoCarga && (
         <div style={modalOverlayStyle} onClick={() => setShowEditCargaModal(false)}>
           <div style={modalContentStyle} onClick={(e) => e.stopPropagation()}>
-            <div style={modalHeaderStyle}><h2 style={{ margin: 0, fontSize: '18px', fontWeight: 800, color: '#FFF' }}>Editar Carga</h2><button style={btnCloseStyle} onClick={() => setShowEditCargaModal(false)}><X size={18} /></button></div>
+            <div style={modalHeaderStyle}>
+              <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 800, color: '#FFF' }}>Editar Carga</h2>
+              <button style={btnCloseStyle} onClick={() => setShowEditCargaModal(false)}><X size={18} /></button>
+            </div>
             <div style={modalBodyStyle}>
               <div style={formGridStyle}>
                 <div style={formGroupStyle}><label style={formLabelStyle}>DT</label><input style={formInputStyle} value={editandoCarga.dt || ''} onChange={e => setEditandoCarga({...editandoCarga, dt: e.target.value})} /></div>
@@ -1631,7 +2208,10 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
       {showStatusModal && selectedCargaForStatus && (
         <div style={modalOverlayStyle} onClick={() => setShowStatusModal(false)}>
           <div style={{...modalContentStyle, maxWidth: '450px'}} onClick={(e) => e.stopPropagation()}>
-            <div style={modalHeaderStyle}><h2 style={{ margin: 0, fontSize: '18px', fontWeight: 800, color: '#FFF' }}>Alterar Status da Carga</h2><button style={btnCloseStyle} onClick={() => setShowStatusModal(false)}><X size={18} /></button></div>
+            <div style={modalHeaderStyle}>
+              <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 800, color: '#FFF' }}>Alterar Status da Carga</h2>
+              <button style={btnCloseStyle} onClick={() => setShowStatusModal(false)}><X size={18} /></button>
+            </div>
             <div style={modalBodyStyle}>
               <div style={formGroupStyle}>
                 <label style={formLabelStyle}>Motorista: {selectedCargaForStatus.motorista}</label>
@@ -1669,8 +2249,13 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
       {showPhotoModal && selectedPhoto && (
         <div style={modalOverlayStyle} onClick={() => setShowPhotoModal(false)}>
           <div style={{...modalContentStyle, maxWidth: '500px'}} onClick={(e) => e.stopPropagation()}>
-            <div style={modalHeaderStyle}><h2 style={{ margin: 0, fontSize: '16px', fontWeight: 800, color: '#FFF' }}>Foto do Check-in</h2><button style={btnCloseStyle} onClick={() => setShowPhotoModal(false)}><X size={18} /></button></div>
-            <div style={{...modalBodyStyle, textAlign: 'center'}}><img src={selectedPhoto} alt="Check-in" style={{ maxWidth: '100%', maxHeight: '50vh', borderRadius: '12px' }} /></div>
+            <div style={modalHeaderStyle}>
+              <h2 style={{ margin: 0, fontSize: '16px', fontWeight: 800, color: '#FFF' }}>Foto do Check-in</h2>
+              <button style={btnCloseStyle} onClick={() => setShowPhotoModal(false)}><X size={18} /></button>
+            </div>
+            <div style={{...modalBodyStyle, textAlign: 'center'}}>
+              <img src={selectedPhoto} alt="Check-in" style={{ maxWidth: '100%', maxHeight: '50vh', borderRadius: '12px' }} />
+            </div>
           </div>
         </div>
       )}
@@ -1678,13 +2263,24 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
       {showCanhotosModal && canhotosModalData && (
         <div style={modalOverlayStyle} onClick={() => setShowCanhotosModal(false)}>
           <div style={{...modalContentStyle, maxWidth: '700px'}} onClick={(e) => e.stopPropagation()}>
-            <div style={modalHeaderStyle}><h2 style={{ margin: 0, fontSize: '16px', fontWeight: 800, color: '#FFF' }}>Canhotos - {canhotosModalData.cargaNome}</h2><button style={btnCloseStyle} onClick={() => setShowCanhotosModal(false)}><X size={18} /></button></div>
+            <div style={modalHeaderStyle}>
+              <h2 style={{ margin: 0, fontSize: '16px', fontWeight: 800, color: '#FFF' }}>Canhotos - {canhotosModalData.cargaNome}</h2>
+              <button style={btnCloseStyle} onClick={() => setShowCanhotosModal(false)}><X size={18} /></button>
+            </div>
             <div style={modalBodyStyle}>
               <div style={galeriaGridStyle}>
                 {canhotosModalData.canhotos.map((canhoto, idx) => (
                   <div key={idx}>
-                    <img src={canhoto.url} alt={`Canhoto ${idx + 1}`} style={thumbnailStyle} className="thumbnail-hover" onClick={() => { setSelectedPhoto(canhoto.url); setShowCanhotosModal(false); setShowPhotoModal(true); }} />
-                    <span style={{ display: 'block', textAlign: 'center', color: '#999', fontSize: '11px', marginTop: '4px' }}>Canhoto {idx + 1}</span>
+                    <img 
+                      src={canhoto.url} 
+                      alt={`Canhoto ${idx + 1}`} 
+                      style={thumbnailStyle} 
+                      className="thumbnail-hover" 
+                      onClick={() => { setSelectedPhoto(canhoto.url); setShowCanhotosModal(false); setShowPhotoModal(true); }} 
+                    />
+                    <span style={{ display: 'block', textAlign: 'center', color: '#999', fontSize: '11px', marginTop: '4px' }}>
+                      Canhoto {idx + 1}
+                    </span>
                   </div>
                 ))}
               </div>
@@ -1693,7 +2289,14 @@ const ListaMotoristas: React.FC<ListaMotoristasProps> = ({ onSelectMotorista }) 
         </div>
       )}
 
-      {mapaModalMotorista && <MotoristaMapaModal key={mapaModalMotorista.id} isOpen={true} onClose={() => setMapaModalMotorista(null)} motorista={mapaModalMotorista} />}
+      {mapaModalMotorista && (
+        <MotoristaMapaModal 
+          key={mapaModalMotorista.id} 
+          isOpen={true} 
+          onClose={() => setMapaModalMotorista(null)} 
+          motorista={mapaModalMotorista} 
+        />
+      )}
 
       {/* MODAL ÚNICO - WHATSAPP CHAT/HISTÓRICO */}
       <WhatsAppChatModal

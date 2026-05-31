@@ -61,7 +61,10 @@ import {
   Layers,
   Route,
   Maximize2,
-  Minimize2
+  Minimize2,
+  Edit3,
+  FileText,
+  Wrench
 } from 'lucide-react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -120,64 +123,16 @@ interface EscalaInfo {
   dataInicio: string;
 }
 
-interface StatusDecision {
-  tipo: string;
-  label: string;
-  cor: string;
-  bg: string;
-  icon: JSX.Element;
-  prioridade: number;
-}
-
-interface PainelEstatisticas {
-  totalMotoristas: number;
-  totalVeiculos: number;
-  motoristasComProgramacao: number;
-  motoristasSemProgramacao: number;
-  veiculosComProgramacao: number;
-  veiculosSemProgramacao: number;
-  emRota: number;
-  aguardandoCarregamento: number;
-  chegouEntrega: number;
-  motoristasFolga: number;
-  motoristasDisponiveis: number;
-  veiculosOnline: number;
-  veiculosOffline: number;
-  motoristasMopp: number;
-  eficienciaFrota: number;
-}
-
-interface PrevisaoTempo {
-  cidade: string;
-  temperatura: number;
-  condicao: string;
-  umidade: number;
-  vento: number;
-  icone: string;
-  tipo: 'coleta' | 'entrega';
-}
-
-interface DadosMapaVeiculo {
-  id: string;
-  nome: string;
-  placa: string;
-  status: string;
-  statusLabel: string;
-  statusCor: string;
-  coordenadas?: { lat: number; lng: number };
-  localizacao: string;
-  velocidade: number;
-  statusRastreador: 'online' | 'offline' | 'parado';
-  cargaAtual?: {
-    coletaLocal: string;
-    coletaCidade: string;
-    entregaLocal: string;
-    entregaCidade: string;
-    observacoes?: string;
-  };
-}
-
-// ============ CONSTANTES ============
+// STATUS DO MOTORISTA
+const STATUS_MOTORISTA_OPTS: Record<string, { label: string; icon: string; cor: string; bg: string }> = {
+  'disponivel': { label: 'Disponível para Programar', icon: '✅', cor: '#22C55E', bg: '#22C55E20' },
+  'folga': { label: 'Folga', icon: '😴', cor: '#FFD700', bg: '#FFD70020' },
+  'ferias': { label: 'Férias', icon: '🏖️', cor: '#FFD700', bg: '#FFD70020' },
+  'sem_veiculo': { label: 'Sem Veículo', icon: '🚫', cor: '#EF4444', bg: '#EF444420' },
+  'falta': { label: 'Falta', icon: '❌', cor: '#EF4444', bg: '#EF444420' },
+  'atestado': { label: 'Atestado', icon: '📋', cor: '#8B5CF6', bg: '#8B5CF620' },
+  'veiculo_manutencao': { label: 'Veículo em Manutenção', icon: '🔧', cor: '#FF9500', bg: '#FF950020' }
+};
 
 const STATUS_CONFIG: Record<string, StatusDecision> = {
   'programada': {
@@ -212,14 +167,6 @@ const STATUS_CONFIG: Record<string, StatusDecision> = {
     icon: <MapPin size={14} />,
     prioridade: 1
   },
-  'folga': {
-    tipo: 'folga',
-    label: 'Em Folga',
-    cor: '#8B5CF6',
-    bg: '#8B5CF620',
-    icon: <Moon size={14} />,
-    prioridade: 5
-  },
   'disponivel': {
     tipo: 'disponivel',
     label: 'Disponível',
@@ -227,6 +174,54 @@ const STATUS_CONFIG: Record<string, StatusDecision> = {
     bg: '#10B98120',
     icon: <CheckCircle size={14} />,
     prioridade: 6
+  },
+  'folga': {
+    tipo: 'folga',
+    label: 'Folga',
+    cor: '#8B5CF6',
+    bg: '#8B5CF620',
+    icon: <Moon size={14} />,
+    prioridade: 5
+  },
+  'ferias': {
+    tipo: 'ferias',
+    label: 'Férias',
+    cor: '#8B5CF6',
+    bg: '#8B5CF620',
+    icon: <Calendar size={14} />,
+    prioridade: 5
+  },
+  'sem_veiculo': {
+    tipo: 'sem_veiculo',
+    label: 'Sem Veículo',
+    cor: '#EF4444',
+    bg: '#EF444420',
+    icon: <AlertTriangle size={14} />,
+    prioridade: 7
+  },
+  'falta': {
+    tipo: 'falta',
+    label: 'Falta',
+    cor: '#EF4444',
+    bg: '#EF444420',
+    icon: <XCircle size={14} />,
+    prioridade: 7
+  },
+  'atestado': {
+    tipo: 'atestado',
+    label: 'Atestado',
+    cor: '#8B5CF6',
+    bg: '#8B5CF620',
+    icon: <FileText size={14} />,
+    prioridade: 7
+  },
+  'veiculo_manutencao': {
+    tipo: 'veiculo_manutencao',
+    label: 'Veículo em Manutenção',
+    cor: '#FF9500',
+    bg: '#FF950020',
+    icon: <Wrench size={14} />,
+    prioridade: 7
   },
   'manutencao': {
     tipo: 'manutencao',
@@ -260,6 +255,71 @@ const CONDICOES_TEMPO: Record<string, { icon: JSX.Element; cor: string }> = {
   'fog': { icon: <CloudFog size={20} />, cor: '#9CA3AF' }
 };
 
+// ============ INTERFACE STATUS DECISION ============
+interface StatusDecision {
+  tipo: string;
+  label: string;
+  cor: string;
+  bg: string;
+  icon: JSX.Element;
+  prioridade: number;
+}
+
+interface PainelEstatisticas {
+  totalMotoristas: number;
+  totalVeiculos: number;
+  motoristasComProgramacao: number;
+  motoristasSemProgramacao: number;
+  veiculosComProgramacao: number;
+  veiculosSemProgramacao: number;
+  emRota: number;
+  aguardandoCarregamento: number;
+  chegouEntrega: number;
+  motoristasFolga: number;
+  motoristasFerias: number;
+  motoristasSemVeiculo: number;
+  motoristasFalta: number;
+  motoristasAtestado: number;
+  motoristasVeiculoManutencao: number;
+  motoristasDisponiveis: number;
+  veiculosOnline: number;
+  veiculosOffline: number;
+  motoristasMopp: number;
+  eficienciaFrota: number;
+}
+
+interface PrevisaoTempo {
+  cidade: string;
+  temperatura: number;
+  condicao: string;
+  umidade: number;
+  vento: number;
+  icone: string;
+  tipo: 'coleta' | 'entrega';
+}
+
+interface DadosMapaVeiculo {
+  id: string;
+  nome: string;
+  placa: string;
+  status: string;
+  statusLabel: string;
+  statusCor: string;
+  coordenadas?: { lat: number; lng: number };
+  localizacao: string;
+  velocidade: number;
+  statusRastreador: 'online' | 'offline' | 'parado';
+  ultimaMacro?: string;
+  rotaMonisat?: string;
+  cargaAtual?: {
+    coletaLocal: string;
+    coletaCidade: string;
+    entregaLocal: string;
+    entregaCidade: string;
+    observacoes?: string;
+  };
+}
+
 // ============ COMPONENTE PRINCIPAL ============
 
 const PainelGeral: React.FC = () => {
@@ -268,6 +328,8 @@ const PainelGeral: React.FC = () => {
   const [veiculos, setVeiculos] = useState<Record<string, VeiculoInfo>>({});
   const [cargasPorMotorista, setCargasPorMotorista] = useState<Record<string, CargaInfo | null>>({});
   const [escalaHojePorMotorista, setEscalaHojePorMotorista] = useState<Record<string, EscalaInfo | null>>({});
+  const [statusSelecionado, setStatusSelecionado] = useState<Record<string, string>>({});
+  const [observacoesTemp, setObservacoesTemp] = useState<Record<string, string>>({});
   const [visaoAtiva, setVisaoAtiva] = useState<'grid' | 'mapa'>('grid');
   const [loading, setLoading] = useState(true);
   const [filtroTexto, setFiltroTexto] = useState('');
@@ -290,6 +352,20 @@ const PainelGeral: React.FC = () => {
     if (!placa) return '';
     return placa.toUpperCase().replace(/[-\s]/g, '');
   };
+
+  // Carregar status e observações salvos do localStorage
+  useEffect(() => {
+    motoristas.forEach(m => {
+      const savedStatus = localStorage.getItem(`status_motorista_${m.id}`);
+      if (savedStatus) {
+        setStatusSelecionado(prev => ({ ...prev, [m.id]: savedStatus }));
+      }
+      const savedObservacao = localStorage.getItem(`observacao_temp_${m.id}`);
+      if (savedObservacao) {
+        setObservacoesTemp(prev => ({ ...prev, [m.id]: savedObservacao }));
+      }
+    });
+  }, [motoristas]);
 
   // Buscar motoristas
   useEffect(() => {
@@ -329,10 +405,10 @@ const PainelGeral: React.FC = () => {
           capacidade: data.capacidade,
           ultimaLocalizacao: data.ultimaLocalizacao || data.ultimoEndereco,
           velocidade: typeof data.velocidade === 'string' ? parseFloat(data.velocidade) : data.velocidade,
-          ultimaAtualizacaoRastreador: data.ultimaAtualizacaoRastreador,
+          ultimaAtualizacaoRastreador: data.ultimaAtualizacaoRastreador || data.ultimaConsulta,
           statusRastreador: data.statusRastreador || 'offline',
           coordenadas: data.coordenadas,
-          ultimaMacro: data.ultimaMacro,
+          ultimaMacro: data.ultimaMacro || data.ultimoStatus,
           ignicao: data.ignicao,
           motorista: data.motorista,
           rotaMonisat: data.rotaMonisat,
@@ -427,7 +503,7 @@ const PainelGeral: React.FC = () => {
     };
   }, [motoristas]);
 
-  // Buscar previsão do tempo para cidades de coleta e entrega
+  // Buscar previsão do tempo (simulada - substituir por API real)
   useEffect(() => {
     const cidadesUnicas = new Set<string>();
     
@@ -438,14 +514,13 @@ const PainelGeral: React.FC = () => {
       }
     });
 
-    // Simular previsão do tempo (substituir por API real como OpenWeatherMap)
     const condicoes = ['clear', 'clouds', 'rain', 'drizzle', 'thunderstorm'];
     const tempoSimulado: PrevisaoTempo[] = Array.from(cidadesUnicas).map((cidade, idx) => ({
       cidade,
-      temperatura: Math.floor(Math.random() * 30) + 15,
+      temperatura: Math.floor(Math.random() * 25) + 15,
       condicao: condicoes[Math.floor(Math.random() * condicoes.length)],
       umidade: Math.floor(Math.random() * 50) + 30,
-      vento: Math.floor(Math.random() * 30) + 5,
+      vento: Math.floor(Math.random() * 25) + 5,
       icone: condicoes[Math.floor(Math.random() * condicoes.length)],
       tipo: idx % 2 === 0 ? 'coleta' : 'entrega'
     }));
@@ -464,7 +539,31 @@ const PainelGeral: React.FC = () => {
     return () => clearInterval(interval);
   }, [autoRefresh, refreshInterval]);
 
-  // Calcular estatísticas
+  // Função para obter o status do motorista (integrado com localStorage)
+  const getMotoristaStatus = (motorista: MotoristaInfo, carga: CargaInfo | null, escala: EscalaInfo | null) => {
+    // Se tem carga, mostra o status da carga
+    if (carga) {
+      return carga.status;
+    }
+    
+    // Se tem status manual salvo, mostra ele
+    const statusManual = statusSelecionado[motorista.id];
+    if (statusManual) {
+      return statusManual;
+    }
+    
+    // Verifica escala do dia
+    if (escala) {
+      if (escala.tipo === 'Descanso Semanal') return 'folga';
+      if (escala.tipo === 'Férias') return 'ferias';
+      if (escala.tipo === 'Falta') return 'falta';
+      if (escala.tipo === 'Atestado') return 'atestado';
+    }
+    
+    return 'disponivel';
+  };
+
+  // Calcular estatísticas expandidas
   const estatisticas = useMemo((): PainelEstatisticas => {
     const totalMotoristas = motoristas.length;
     const totalVeiculos = Object.keys(veiculos).length;
@@ -495,16 +594,60 @@ const PainelGeral: React.FC = () => {
       return carga?.status === 'chegou_entrega';
     }).length;
     
+    // Status baseados em escala e manual
     const motoristasFolga = motoristas.filter(m => {
+      const carga = cargasPorMotorista[m.id];
+      if (carga) return false;
+      const statusManual = statusSelecionado[m.id];
+      if (statusManual === 'folga') return true;
       const escala = escalaHojePorMotorista[m.id];
-      return escala && (escala.tipo === 'Descanso Semanal' || escala.tipo === 'Férias');
+      return escala && escala.tipo === 'Descanso Semanal';
+    }).length;
+    
+    const motoristasFerias = motoristas.filter(m => {
+      const carga = cargasPorMotorista[m.id];
+      if (carga) return false;
+      const statusManual = statusSelecionado[m.id];
+      if (statusManual === 'ferias') return true;
+      const escala = escalaHojePorMotorista[m.id];
+      return escala && escala.tipo === 'Férias';
+    }).length;
+    
+    const motoristasSemVeiculo = motoristas.filter(m => {
+      const carga = cargasPorMotorista[m.id];
+      if (carga) return false;
+      const statusManual = statusSelecionado[m.id];
+      return statusManual === 'sem_veiculo';
+    }).length;
+    
+    const motoristasFalta = motoristas.filter(m => {
+      const carga = cargasPorMotorista[m.id];
+      if (carga) return false;
+      const statusManual = statusSelecionado[m.id];
+      if (statusManual === 'falta') return true;
+      const escala = escalaHojePorMotorista[m.id];
+      return escala && escala.tipo === 'Falta';
+    }).length;
+    
+    const motoristasAtestado = motoristas.filter(m => {
+      const carga = cargasPorMotorista[m.id];
+      if (carga) return false;
+      const statusManual = statusSelecionado[m.id];
+      if (statusManual === 'atestado') return true;
+      const escala = escalaHojePorMotorista[m.id];
+      return escala && escala.tipo === 'Atestado';
+    }).length;
+    
+    const motoristasVeiculoManutencao = motoristas.filter(m => {
+      const carga = cargasPorMotorista[m.id];
+      if (carga) return false;
+      const statusManual = statusSelecionado[m.id];
+      return statusManual === 'veiculo_manutencao';
     }).length;
     
     const motoristasDisponiveis = motoristas.filter(m => {
-      const temCarga = cargasPorMotorista[m.id] !== null;
-      const escala = escalaHojePorMotorista[m.id];
-      const emFolga = escala && (escala.tipo === 'Descanso Semanal' || escala.tipo === 'Férias');
-      return !temCarga && !emFolga;
+      const status = getMotoristaStatus(m, cargasPorMotorista[m.id], escalaHojePorMotorista[m.id]);
+      return status === 'disponivel';
     }).length;
     
     const veiculosOnline = Object.values(veiculos).filter(v => v.statusRastreador === 'online').length;
@@ -512,6 +655,7 @@ const PainelGeral: React.FC = () => {
     
     const motoristasMopp = motoristas.filter(m => m.temMopp === 'Sim').length;
     
+    // Eficiência = (ComProgramacao + Disponiveis) / Total
     const eficienciaFrota = totalMotoristas > 0
       ? Math.round(((motoristasComProgramacao + motoristasDisponiveis) / totalMotoristas) * 100)
       : 0;
@@ -527,38 +671,44 @@ const PainelGeral: React.FC = () => {
       aguardandoCarregamento,
       chegouEntrega,
       motoristasFolga,
+      motoristasFerias,
+      motoristasSemVeiculo,
+      motoristasFalta,
+      motoristasAtestado,
+      motoristasVeiculoManutencao,
       motoristasDisponiveis,
       veiculosOnline,
       veiculosOffline,
       motoristasMopp,
       eficienciaFrota
     };
-  }, [motoristas, cargasPorMotorista, escalaHojePorMotorista, veiculos]);
+  }, [motoristas, cargasPorMotorista, escalaHojePorMotorista, veiculos, statusSelecionado]);
 
   // Dados combinados com informações de status
   const dadosCombinados = useMemo(() => {
     return motoristas.map(motorista => {
       const carga = cargasPorMotorista[motorista.id];
       const escala = escalaHojePorMotorista[motorista.id];
+      const statusKey = getMotoristaStatus(motorista, carga, escala);
+      const statusConfig = STATUS_CONFIG[statusKey] || STATUS_CONFIG['disponivel'];
+      const statusManual = statusSelecionado[motorista.id];
+      const statusManualInfo = statusManual ? STATUS_MOTORISTA_OPTS[statusManual] : null;
+      const observacao = observacoesTemp[motorista.id] || '';
+      
       const placaNormalizada = carga ? normalizarPlaca(carga.placa) : '';
       const veiculo = placaNormalizada ? veiculos[placaNormalizada] : undefined;
-      
-      let statusTipo = 'disponivel';
-      let statusConfig = STATUS_CONFIG['disponivel'];
-      
-      if (carga) {
-        statusTipo = carga.status;
-        statusConfig = STATUS_CONFIG[carga.status] || STATUS_CONFIG['atencao'];
-      } else if (escala && (escala.tipo === 'Descanso Semanal' || escala.tipo === 'Férias')) {
-        statusTipo = 'folga';
-        statusConfig = STATUS_CONFIG['folga'];
-      }
       
       const precisaAtencao = (
         (veiculo && veiculo.statusRastreador !== 'online') ||
         (veiculo && veiculo.velocidade && veiculo.velocidade > 80) ||
-        (carga && carga.coletaData && new Date(carga.coletaData) < new Date() && carga.status === 'programada')
+        (carga && carga.coletaData && new Date(carga.coletaData) < new Date() && carga.status === 'programada') ||
+        (observacao && observacao.length > 0) ||
+        (carga && carga.observacoes && carga.observacoes.length > 0)
       );
+      
+      // Formatar data de entrega para exibição
+      const dataEntregaFormatada = carga ? new Date(carga.entregaData).toLocaleDateString('pt-BR') : null;
+      const coletaComAtraso = carga && carga.coletaData && new Date(carga.coletaData) < new Date() && carga.status === 'programada';
       
       return {
         id: motorista.id,
@@ -572,20 +722,31 @@ const PainelGeral: React.FC = () => {
         carga,
         escala,
         veiculo,
-        status: statusTipo,
+        status: statusKey,
         statusInfo: statusConfig,
+        statusManual: statusManualInfo,
+        observacao,
         precisaAtencao,
         localizacao: veiculo?.ultimaLocalizacao || motorista.cidade || 'Não disponível',
         velocidade: veiculo?.velocidade || 0,
         ultimaAtualizacao: veiculo?.ultimaAtualizacaoRastreador,
         coordenadas: veiculo?.coordenadas,
         rotaMonisat: veiculo?.rotaMonisat,
-        motoristaRastreador: veiculo?.motorista,
         ultimaMacro: veiculo?.ultimaMacro,
-        statusRastreador: veiculo?.statusRastreador || 'offline'
+        ultimaAtualizacaoRotaMonisat: veiculo?.ultimaAtualizacaoRotaMonisat,
+        motoristaRastreador: veiculo?.motorista,
+        statusRastreador: veiculo?.statusRastreador || 'offline',
+        dataEntregaFormatada,
+        coletaComAtraso
       };
-    }).sort((a, b) => a.statusInfo.prioridade - b.statusInfo.prioridade);
-  }, [motoristas, cargasPorMotorista, escalaHojePorMotorista, veiculos]);
+    }).sort((a, b) => {
+      // Prioridade: cargas em andamento primeiro
+      const prioridadeA = a.carga ? 1 : 2;
+      const prioridadeB = b.carga ? 1 : 2;
+      if (prioridadeA !== prioridadeB) return prioridadeA - prioridadeB;
+      return a.statusInfo.prioridade - b.statusInfo.prioridade;
+    });
+  }, [motoristas, cargasPorMotorista, escalaHojePorMotorista, veiculos, statusSelecionado, observacoesTemp]);
 
   // Dados filtrados
   const dadosFiltrados = useMemo(() => {
@@ -613,7 +774,9 @@ const PainelGeral: React.FC = () => {
       coordenadas: item.coordenadas,
       localizacao: item.localizacao,
       velocidade: item.velocidade,
-      statusRastreador: item.statusRastreador,
+      statusRastreador: item.statusRastreador as 'online' | 'offline' | 'parado',
+      ultimaMacro: item.ultimaMacro,
+      rotaMonisat: item.rotaMonisat,
       cargaAtual: item.carga ? {
         coletaLocal: item.carga.coletaLocal,
         coletaCidade: item.carga.coletaCidade,
@@ -624,16 +787,74 @@ const PainelGeral: React.FC = () => {
     })) as DadosMapaVeiculo[];
   }, [dadosFiltrados]);
 
+  // Função para aplicar filtro rápido pelo dashboard
+  const aplicarFiltroDashboard = (statusFiltro: string) => {
+    setFiltroStatus(statusFiltro);
+    setFiltrosAbertos(true);
+    // Scroll para a lista de cards
+    setTimeout(() => {
+      const element = document.getElementById('cards-container');
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth' });
+      }
+    }, 100);
+  };
+
+  // Função para criar ícone de caminhão personalizado
+  const createTruckIcon = (status: string, statusCor: string) => {
+    let statusText = '';
+    let statusBg = statusCor;
+    
+    switch(status) {
+      case 'seguindo_para_entrega':
+        statusText = '🚛 EM ROTA';
+        statusBg = '#22C55E';
+        break;
+      case 'chegou_entrega':
+        statusText = '📍 CHEGOU';
+        statusBg = '#3B82F6';
+        break;
+      case 'aguardando_carregamento':
+        statusText = '⏳ AGUARDANDO';
+        statusBg = '#FF9500';
+        break;
+      case 'programada':
+        statusText = '📋 PROGRAMADO';
+        statusBg = '#FFD700';
+        break;
+      default:
+        statusText = '✅ PARADO';
+        statusBg = '#6B7280';
+    }
+    
+    const html = `
+      <div style="position: relative; width: 40px; height: 40px;">
+        <div style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: ${statusBg}; border: 3px solid white; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 10px rgba(0,0,0,0.3); transition: all 0.2s ease; font-size: 22px;">
+          🚛
+        </div>
+        <div style="position: absolute; bottom: -8px; left: 50%; transform: translateX(-50%); font-size: 9px; font-weight: bold; color: white; background: rgba(0,0,0,0.8); padding: 2px 6px; border-radius: 12px; white-space: nowrap;">
+          ${statusText}
+        </div>
+      </div>
+    `;
+    
+    return L.divIcon({
+      html,
+      iconSize: [40, 40],
+      className: 'custom-truck-marker',
+      popupAnchor: [0, -20]
+    });
+  };
+
   // Inicializar e atualizar mapa
   useEffect(() => {
     if (visaoAtiva !== 'mapa') return;
 
-    // Inicializar mapa se não existir
     if (!mapRef.current) {
       const mapContainer = document.getElementById('map-container');
       if (!mapContainer) return;
 
-      mapRef.current = L.map('map-container').setView([-15.7975, -47.8919], 4); // Centro do Brasil
+      mapRef.current = L.map('map-container').setView([-15.7975, -47.8919], 4);
 
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap contributors',
@@ -641,63 +862,45 @@ const PainelGeral: React.FC = () => {
       }).addTo(mapRef.current);
     }
 
-    // Limpar marcadores antigos
     Object.values(markersRef.current).forEach(marker => {
       mapRef.current?.removeLayer(marker);
     });
     markersRef.current = {};
 
-    // Adicionar novos marcadores
     dadosMapa.forEach(item => {
       if (item.coordenadas?.lat && item.coordenadas?.lng) {
-        const cor = item.statusCor;
-        const html = `
-          <div style="
-            width: 32px;
-            height: 32px;
-            background: ${cor};
-            border: 3px solid white;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
-            color: white;
-            font-size: 12px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-          ">
-            🚛
-          </div>
-        `;
-
-        const marker = L.marker([item.coordenadas.lat, item.coordenadas.lng], {
-          icon: L.divIcon({
-            html,
-            iconSize: [32, 32],
-            className: 'custom-marker'
-          })
-        }).addTo(mapRef.current!);
-
-        // Popup com informações
+        const icon = createTruckIcon(item.status, item.statusCor);
+        
         const popupContent = `
-          <div style="font-family: Arial; font-size: 12px; color: #333;">
-            <strong>${item.nome}</strong><br/>
-            Placa: ${item.placa}<br/>
-            Status: ${item.statusLabel}<br/>
-            Velocidade: ${item.velocidade} km/h<br/>
+          <div style="font-family: Arial, sans-serif; font-size: 12px; color: #333; min-width: 220px; max-width: 280px;">
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid #eee;">
+              <strong style="font-size: 14px; color: ${item.statusCor};">🚛 ${item.nome}</strong>
+            </div>
+            <div><strong>Placa:</strong> ${item.placa || '—'}</div>
+            <div><strong>Status:</strong> <span style="color: ${item.statusCor};">${item.statusLabel}</span></div>
+            <div><strong>Velocidade:</strong> ${item.velocidade > 0 ? `${item.velocidade} km/h` : 'Parado'}</div>
+            ${item.ultimaMacro ? `<div><strong>Última Macro:</strong> ${item.ultimaMacro}</div>` : ''}
+            ${item.rotaMonisat ? `<div><strong>Rota Monisat:</strong> <span style="font-size: 10px;">${item.rotaMonisat.substring(0, 50)}...</span></div>` : ''}
+            <div><strong>Localização:</strong> ${item.localizacao?.substring(0, 40) || '—'}${item.localizacao && item.localizacao.length > 40 ? '...' : ''}</div>
             ${item.cargaAtual ? `
-              Coleta: ${item.cargaAtual.coletaCidade}<br/>
-              Entrega: ${item.cargaAtual.entregaCidade}
+              <div style="margin-top: 8px; padding-top: 6px; border-top: 1px solid #eee;">
+                <div><strong>📦 Coleta:</strong> ${item.cargaAtual.coletaCidade}</div>
+                <div><strong>📍 Entrega:</strong> ${item.cargaAtual.entregaCidade}</div>
+                ${item.cargaAtual.observacoes ? `<div style="margin-top: 4px; color: #FFD700;"><strong>⚠️ Obs:</strong> ${item.cargaAtual.observacoes.substring(0, 50)}${item.cargaAtual.observacoes.length > 50 ? '...' : ''}</div>` : ''}
+              </div>
             ` : ''}
+            <div style="margin-top: 8px; font-size: 10px; color: #666;">
+              ⏱️ ${formatarUltimaAtualizacao(item.ultimaAtualizacao)}
+            </div>
           </div>
         `;
 
+        const marker = L.marker([item.coordenadas.lat, item.coordenadas.lng], { icon }).addTo(mapRef.current!);
         marker.bindPopup(popupContent);
         markersRef.current[item.id] = marker;
       }
     });
 
-    // Ajustar visualização para mostrar todos os marcadores
     if (Object.keys(markersRef.current).length > 0) {
       const group = new L.FeatureGroup(Object.values(markersRef.current));
       mapRef.current?.fitBounds(group.getBounds().pad(0.1));
@@ -746,10 +949,284 @@ const PainelGeral: React.FC = () => {
     return '#EF4444';
   };
 
+  // Componente de Card Estatístico Clicável
+  const StatCard = ({ title, value, icon, color, subtitle, onClick, filterValue }: any) => (
+    <div
+      onClick={() => onClick && onClick(filterValue)}
+      style={{
+        backgroundColor: '#0A0A0A',
+        borderRadius: '16px',
+        border: `1px solid ${color}30`,
+        padding: '16px',
+        transition: 'all 0.2s ease',
+        cursor: onClick ? 'pointer' : 'default'
+      }}
+      onMouseEnter={(e) => {
+        if (onClick) {
+          e.currentTarget.style.transform = 'translateY(-2px)';
+          e.currentTarget.style.boxShadow = `0 4px 12px ${color}40`;
+          e.currentTarget.style.borderColor = color;
+        }
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.transform = 'translateY(0)';
+        e.currentTarget.style.boxShadow = 'none';
+        e.currentTarget.style.borderColor = `${color}30`;
+      }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div>
+          <div style={{ fontSize: '28px', fontWeight: 800, color: '#FFF' }}>{value}</div>
+          <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>{title}</div>
+          {subtitle && <div style={{ fontSize: '10px', color: color }}>{subtitle}</div>}
+        </div>
+        <div style={{ color: color }}>{icon}</div>
+      </div>
+    </div>
+  );
+
+  // Componente de Recomendações
+  const RecomendacoesWidget = () => {
+    const recomendacoes = [];
+    
+    if (estatisticas.motoristasDisponiveis > 0) {
+      recomendacoes.push({
+        text: `${estatisticas.motoristasDisponiveis} motoristas disponíveis para programação`,
+        filter: 'disponivel',
+        color: '#10B981'
+      });
+    }
+    
+    if (estatisticas.emRota > 0) {
+      recomendacoes.push({
+        text: `${estatisticas.emRota} motoristas em rota - Acompanhar entregas`,
+        filter: 'seguindo_para_entrega',
+        color: '#22C55E'
+      });
+    }
+    
+    if (estatisticas.chegouEntrega > 0) {
+      recomendacoes.push({
+        text: `${estatisticas.chegouEntrega} motoristas chegaram na entrega - Aguardando descarga`,
+        filter: 'chegou_entrega',
+        color: '#3B82F6'
+      });
+    }
+    
+    if (estatisticas.aguardandoCarregamento > 0) {
+      recomendacoes.push({
+        text: `${estatisticas.aguardandoCarregamento} motoristas aguardando carregamento`,
+        filter: 'aguardando_carregamento',
+        color: '#FF9500'
+      });
+    }
+    
+    if (estatisticas.motoristasFolga > 0) {
+      recomendacoes.push({
+        text: `${estatisticas.motoristasFolga} motoristas em folga hoje`,
+        filter: 'folga',
+        color: '#8B5CF6'
+      });
+    }
+    
+    if (estatisticas.motoristasFerias > 0) {
+      recomendacoes.push({
+        text: `${estatisticas.motoristasFerias} motoristas de férias`,
+        filter: 'ferias',
+        color: '#8B5CF6'
+      });
+    }
+    
+    if (estatisticas.motoristasSemVeiculo > 0) {
+      recomendacoes.push({
+        text: `${estatisticas.motoristasSemVeiculo} motoristas sem veículo - Verificar alocação`,
+        filter: 'sem_veiculo',
+        color: '#EF4444'
+      });
+    }
+    
+    if (estatisticas.motoristasVeiculoManutencao > 0) {
+      recomendacoes.push({
+        text: `${estatisticas.motoristasVeiculoManutencao} veículos em manutenção`,
+        filter: 'veiculo_manutencao',
+        color: '#FF9500'
+      });
+    }
+    
+    if (estatisticas.veiculosOffline > 5) {
+      recomendacoes.push({
+        text: `${estatisticas.veiculosOffline} veículos offline - Verificar rastreadores`,
+        filter: null,
+        color: '#EF4444'
+      });
+    }
+    
+    const veiculosAltaVelocidade = dadosCombinados.filter(d => d.velocidade > 80).length;
+    if (veiculosAltaVelocidade > 0) {
+      recomendacoes.push({
+        text: `${veiculosAltaVelocidade} veículos em alta velocidade`,
+        filter: null,
+        color: '#EF4444'
+      });
+    }
+    
+    const cargasAtrasadas = dadosCombinados.filter(d => d.coletaComAtraso).length;
+    if (cargasAtrasadas > 0) {
+      recomendacoes.push({
+        text: `${cargasAtrasadas} cargas programadas com atraso na coleta`,
+        filter: 'programada',
+        color: '#EF4444'
+      });
+    }
+
+    const cargasComObservacoes = dadosCombinados.filter(d => 
+      d.carga && d.carga.observacoes && d.carga.observacoes.trim().length > 0
+    ).length;
+    if (cargasComObservacoes > 0) {
+      recomendacoes.push({
+        text: `${cargasComObservacoes} cargas com observações importantes`,
+        filter: null,
+        color: '#FFD700'
+      });
+    }
+    
+    const motoristasComObservacao = dadosCombinados.filter(d => d.observacao && d.observacao.trim().length > 0).length;
+    if (motoristasComObservacao > 0) {
+      recomendacoes.push({
+        text: `${motoristasComObservacao} motoristas com observações cadastradas`,
+        filter: null,
+        color: '#FFD700'
+      });
+    }
+    
+    if (recomendacoes.length === 0) {
+      recomendacoes.push({
+        text: 'Tudo em ordem! Nenhuma ação urgente necessária.',
+        filter: null,
+        color: '#22C55E'
+      });
+    }
+    
+    return (
+      <div
+        style={{
+          backgroundColor: '#0A0A0A',
+          borderRadius: '20px',
+          border: '1px solid #1A1A1A',
+          padding: '16px'
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+          <Target size={18} color="#FFD700" />
+          <span style={{ fontWeight: 600, color: '#FFF' }}>Recomendações para Tomada de Decisão</span>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {recomendacoes.map((rec, idx) => (
+            <div
+              key={idx}
+              onClick={() => rec.filter && aplicarFiltroDashboard(rec.filter)}
+              style={{
+                padding: '10px',
+                background: '#1A1A1A',
+                borderRadius: '10px',
+                fontSize: '13px',
+                color: rec.color,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                cursor: rec.filter ? 'pointer' : 'default',
+                transition: 'all 0.2s ease'
+              }}
+              onMouseEnter={(e) => {
+                if (rec.filter) {
+                  e.currentTarget.style.backgroundColor = `${rec.color}20`;
+                  e.currentTarget.style.transform = 'translateX(4px)';
+                }
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = '#1A1A1A';
+                e.currentTarget.style.transform = 'translateX(0)';
+              }}
+            >
+              <AlertCircle size={14} />
+              <span>{rec.text}</span>
+              {rec.filter && <ChevronDown size={12} style={{ marginLeft: 'auto', transform: 'rotate(-90deg)' }} />}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  // Componente de Previsão do Tempo
+  const PrevisaoTempoWidget = () => {
+    if (previsaoTempo.length === 0) return null;
+    
+    return (
+      <div
+        style={{
+          backgroundColor: '#0A0A0A',
+          borderRadius: '20px',
+          border: '1px solid #1A1A1A',
+          padding: '16px'
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+          <CloudRain size={18} color="#FFD700" />
+          <span style={{ fontWeight: 600, color: '#FFF' }}>Previsão do Tempo - Cidades de Coleta e Entrega</span>
+        </div>
+        <div style={{ display: 'flex', gap: '12px', overflowX: 'auto', paddingBottom: '8px' }}>
+          {previsaoTempo.slice(0, 12).map((cidade, idx) => {
+            const condicaoInfo = CONDICOES_TEMPO[cidade.icone] || CONDICOES_TEMPO['clouds'];
+            return (
+              <div
+                key={idx}
+                style={{
+                  minWidth: '120px',
+                  padding: '12px',
+                  background: '#1A1A1A',
+                  borderRadius: '12px',
+                  textAlign: 'center',
+                  border: `1px solid ${cidade.tipo === 'coleta' ? '#22C55E' : '#3B82F6'}`
+                }}
+              >
+                <div style={{ fontSize: '11px', fontWeight: 600, color: '#FFF' }}>
+                  {cidade.cidade.length > 15 ? cidade.cidade.substring(0, 12) + '...' : cidade.cidade}
+                </div>
+                <div style={{ fontSize: '9px', color: cidade.tipo === 'coleta' ? '#22C55E' : '#3B82F6', marginBottom: '4px' }}>
+                  {cidade.tipo === 'coleta' ? '📦 Coleta' : '📍 Entrega'}
+                </div>
+                <div style={{ color: condicaoInfo.cor, margin: '8px 0', display: 'flex', justifyContent: 'center' }}>
+                  {condicaoInfo.icon}
+                </div>
+                <div style={{ fontSize: '18px', fontWeight: 700, color: '#FFD700' }}>
+                  {cidade.temperatura}°C
+                </div>
+                <div style={{ fontSize: '9px', color: '#666', marginTop: '4px' }}>
+                  💧 {cidade.umidade}% | 💨 {cidade.vento}km/h
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
   // Componente de Card Informativo
   const CardInformativo = ({ item }: { item: typeof dadosCombinados[0] }) => {
-    const temObservacoes = item.carga?.observacoes && item.carga.observacoes.trim().length > 0;
+    const temObservacoesMotorista = item.observacao && item.observacao.trim().length > 0;
+    const temObservacoesCarga = item.carga?.observacoes && item.carga.observacoes.trim().length > 0;
     const mostrarObservacoes = showObservacoes[item.id] || false;
+    const statusExibido = item.statusManual || item.statusInfo;
+
+    // Determinar ícone da cidade
+    const cidadeIcon = () => {
+      if (item.coletaComAtraso) return '🔴';
+      if (item.carga?.status === 'chegou_entrega') return '📍';
+      if (item.carga?.status === 'seguindo_para_entrega') return '🚛';
+      return '📍';
+    };
 
     return (
       <div
@@ -775,8 +1252,8 @@ const PainelGeral: React.FC = () => {
         <div
           style={{
             padding: '16px 20px',
-            background: item.statusInfo.bg,
-            borderBottom: `1px solid ${item.statusInfo.cor}`,
+            background: statusExibido.bg || '#1A1A1A',
+            borderBottom: `1px solid ${statusExibido.cor || '#FFD700'}`,
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center'
@@ -788,21 +1265,21 @@ const PainelGeral: React.FC = () => {
                 width: '40px',
                 height: '40px',
                 borderRadius: '50%',
-                background: item.statusInfo.cor,
+                background: statusExibido.cor || '#FFD700',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 color: '#000'
               }}
             >
-              {item.statusInfo.icon}
+              {statusExibido.icon || <CheckCircle size={14} />}
             </div>
             <div>
               <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: '#FFF' }}>
                 {item.nome}
               </h3>
-              <p style={{ margin: '2px 0 0', fontSize: '11px', color: item.statusInfo.cor }}>
-                {item.statusInfo.label}
+              <p style={{ margin: '2px 0 0', fontSize: '11px', color: statusExibido.cor || '#FFD700' }}>
+                {statusExibido.label}
               </p>
             </div>
           </div>
@@ -812,9 +1289,14 @@ const PainelGeral: React.FC = () => {
                 <AlertCircle size={20} />
               </div>
             )}
-            {temObservacoes && (
+            {(temObservacoesMotorista || temObservacoesCarga) && (
               <div style={{ color: '#FFD700' }}>
                 <MessageSquare size={20} />
+              </div>
+            )}
+            {item.temMopp === 'Sim' && (
+              <div style={{ color: '#22C55E' }}>
+                <CheckCircle size={16} />
               </div>
             )}
           </div>
@@ -823,34 +1305,14 @@ const PainelGeral: React.FC = () => {
         {/* Conteúdo do Card */}
         <div style={{ padding: '16px 20px' }}>
           {/* Informações Básicas */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '12px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#AAA' }}>
-              <MapPin size={12} color="#FFD700" />
-              <span>{item.cidade || 'Não informada'}</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#AAA' }}>
-              <Phone size={12} color="#FFD700" />
-              <span>{item.whatsapp || item.telefone || '—'}</span>
-            </div>
+          <div style={{ fontSize: '13px', color: '#AAA', marginBottom: '12px' }}>
+            {item.cidade || 'Cidade não informada'}
           </div>
 
-          {/* Badge MOPP */}
-          {item.temMopp === 'Sim' && (
-            <div
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '4px',
-                padding: '4px 10px',
-                background: '#22C55E20',
-                borderRadius: '20px',
-                marginBottom: '12px'
-              }}
-            >
-              <CheckCircle size={12} color="#22C55E" />
-              <span style={{ fontSize: '10px', fontWeight: 600, color: '#22C55E' }}>MOPP</span>
-            </div>
-          )}
+          {/* Viagens Realizadas */}
+          <div style={{ fontSize: '12px', color: '#888', marginBottom: '12px' }}>
+            🚛 Viagens realizadas: {item.viagensRealizadas}
+          </div>
 
           {/* Carga Atual */}
           {item.carga && (
@@ -866,127 +1328,20 @@ const PainelGeral: React.FC = () => {
                 <Truck size={12} color="#FFD700" />
                 <span style={{ fontSize: '11px', fontWeight: 600, color: '#FFD700' }}>CARGA ATUAL</span>
               </div>
-              <div style={{ fontSize: '12px', color: '#FFF', marginBottom: '4px' }}>
+              <div style={{ fontSize: '12px', color: '#FFF', marginBottom: '8px' }}>
                 <strong>Placa:</strong> {item.carga.placa}
               </div>
-              <div style={{ fontSize: '12px', color: '#AAA', marginBottom: '4px' }}>
-                📍 {item.carga.coletaCidade} → {item.carga.entregaCidade}
+              <div style={{ fontSize: '12px', color: item.coletaComAtraso ? '#EF4444' : '#AAA', marginBottom: '4px' }}>
+                {item.coletaComAtraso ? '🔴' : '📍'} {item.carga.coletaCidade} → {item.carga.entregaCidade}
               </div>
-              <div style={{ fontSize: '11px', color: '#888', marginBottom: '8px' }}>
-                📅 Entrega: {new Date(item.carga.entregaData).toLocaleDateString('pt-BR')}
-              </div>
-              
-              {/* Previsão do Tempo para Cidades */}
-              <div style={{ display: 'flex', gap: '8px', marginBottom: '8px', fontSize: '10px', flexWrap: 'wrap' }}>
-                {previsaoTempo.map((tempo, idx) => {
-                  if (tempo.cidade === item.carga?.coletaCidade || tempo.cidade === item.carga?.entregaCidade) {
-                    const condicaoInfo = CONDICOES_TEMPO[tempo.icone] || CONDICOES_TEMPO['clouds'];
-                    return (
-                      <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '4px 8px', background: '#2A2A2A', borderRadius: '6px' }}>
-                        <span style={{ color: '#888' }}>{tempo.cidade}:</span>
-                        <span style={{ color: condicaoInfo.cor }}>{tempo.temperatura}°C</span>
-                      </div>
-                    );
-                  }
-                  return null;
-                })}
-              </div>
-
-              {/* Observações */}
-              {temObservacoes && (
-                <div
-                  style={{
-                    marginTop: '8px',
-                    paddingTop: '8px',
-                    borderTop: '1px solid #2A2A2A'
-                  }}
-                >
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setShowObservacoes(prev => ({ ...prev, [item.id]: !mostrarObservacoes }));
-                    }}
-                    style={{
-                      width: '100%',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      padding: '6px 0',
-                      background: 'transparent',
-                      border: 'none',
-                      color: '#FFD700',
-                      fontSize: '10px',
-                      fontWeight: 600,
-                      cursor: 'pointer'
-                    }}
-                  >
-                    <MessageSquare size={12} />
-                    Observações {mostrarObservacoes ? '▼' : '▶'}
-                  </button>
-                  {mostrarObservacoes && (
-                    <div
-                      style={{
-                        marginTop: '6px',
-                        padding: '8px',
-                        background: '#2A2A2A',
-                        borderRadius: '6px',
-                        fontSize: '10px',
-                        color: '#CCC',
-                        lineHeight: '1.4',
-                        maxHeight: '100px',
-                        overflowY: 'auto'
-                      }}
-                    >
-                      {item.carga.observacoes}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Monitoramento em Tempo Real */}
-          {item.veiculo && (
-            <div
-              style={{
-                marginTop: '12px',
-                padding: '12px',
-                background: '#1A1A1A',
-                borderRadius: '12px',
-                border: `1px solid ${item.statusRastreador === 'online' ? '#22C55E' : '#EF4444'}`
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
-                <Activity size={12} color="#FFD700" />
-                <span style={{ fontSize: '11px', fontWeight: 600, color: '#FFD700' }}>LOCALIZAÇÃO EM TEMPO REAL</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                <span style={{ fontSize: '11px', color: '#888' }}>📍 Localização:</span>
-                <span style={{ fontSize: '11px', color: '#22C55E' }}>
-                  {item.localizacao?.substring(0, 30) || '—'}
-                </span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                <span style={{ fontSize: '11px', color: '#888' }}>🏎️ Velocidade:</span>
-                <span style={{ fontSize: '11px', color: getVelocidadeColor(item.velocidade) }}>
-                  {item.velocidade > 0 ? `${item.velocidade} km/h` : 'Parado'}
-                  {item.velocidade > 80 && ' ⚠️'}
-                </span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ fontSize: '11px', color: '#888' }}>📡 Status:</span>
-                <span style={{ fontSize: '11px', color: item.statusRastreador === 'online' ? '#22C55E' : '#EF4444', fontWeight: 'bold' }}>
-                  {item.statusRastreador === 'online' ? '🟢 Online' : '🔴 Offline'}
-                </span>
-              </div>
-              <div style={{ fontSize: '10px', color: '#666', marginTop: '6px' }}>
-                ⏱️ {formatarUltimaAtualizacao(item.ultimaAtualizacao)}
+              <div style={{ fontSize: '11px', color: item.coletaComAtraso ? '#EF4444' : '#888' }}>
+                📅 Entrega: {item.dataEntregaFormatada}
               </div>
             </div>
           )}
 
-          {/* Status quando sem programação */}
-          {!item.carga && item.status !== 'folga' && (
+          {/* Status quando sem programação e disponível */}
+          {!item.carga && item.status === 'disponivel' && (
             <div
               style={{
                 marginTop: '12px',
@@ -1038,217 +1393,28 @@ const PainelGeral: React.FC = () => {
                 <Phone size={12} /> WhatsApp
               </button>
             )}
-            {item.coordenadas && (
-              <button
-                style={{
-                  flex: 1,
-                  padding: '8px',
-                  background: '#3B82F620',
-                  border: '1px solid #3B82F6',
-                  borderRadius: '8px',
-                  color: '#3B82F6',
-                  fontSize: '11px',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '4px'
-                }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  window.open(`https://www.google.com/maps?q=${item.coordenadas?.lat},${item.coordenadas?.lng}`, '_blank');
-                }}
-              >
-                <Navigation size={12} /> Ver Mapa
-              </button>
-            )}
           </div>
         </div>
       </div>
     );
   };
 
-  // Componente de Previsão do Tempo
-  const PrevisaoTempoWidget = () => {
-    if (previsaoTempo.length === 0) return null;
-    
-    return (
-      <div
-        style={{
-          backgroundColor: '#0A0A0A',
-          borderRadius: '20px',
-          border: '1px solid #1A1A1A',
-          padding: '16px'
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-          <CloudRain size={18} color="#FFD700" />
-          <span style={{ fontWeight: 600, color: '#FFF' }}>Previsão do Tempo - Cidades de Coleta e Entrega</span>
-        </div>
-        <div style={{ display: 'flex', gap: '12px', overflowX: 'auto', paddingBottom: '8px' }}>
-          {previsaoTempo.map((cidade, idx) => {
-            const condicaoInfo = CONDICOES_TEMPO[cidade.icone] || CONDICOES_TEMPO['clouds'];
-            return (
-              <div
-                key={idx}
-                style={{
-                  minWidth: '120px',
-                  padding: '12px',
-                  background: '#1A1A1A',
-                  borderRadius: '12px',
-                  textAlign: 'center',
-                  border: `1px solid ${cidade.tipo === 'coleta' ? '#22C55E' : '#3B82F6'}`
-                }}
-              >
-                <div style={{ fontSize: '11px', fontWeight: 600, color: '#FFF' }}>
-                  {cidade.cidade}
-                </div>
-                <div style={{ fontSize: '9px', color: cidade.tipo === 'coleta' ? '#22C55E' : '#3B82F6', marginBottom: '4px' }}>
-                  {cidade.tipo === 'coleta' ? '📦 Coleta' : '📍 Entrega'}
-                </div>
-                <div style={{ color: condicaoInfo.cor, margin: '8px 0', display: 'flex', justifyContent: 'center' }}>
-                  {condicaoInfo.icon}
-                </div>
-                <div style={{ fontSize: '18px', fontWeight: 700, color: '#FFD700' }}>
-                  {cidade.temperatura}°C
-                </div>
-                <div style={{ fontSize: '9px', color: '#666', marginTop: '4px' }}>
-                  💧 {cidade.umidade}% | 💨 {cidade.vento}km/h
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    );
-  };
-
-  // Componente de Recomendações
-  const RecomendacoesWidget = () => {
-    const recomendacoes = [];
-    
-    if (estatisticas.motoristasDisponiveis > 0) {
-      recomendacoes.push(`${estatisticas.motoristasDisponiveis} motoristas disponíveis para programação`);
-    }
-    
-    if (estatisticas.veiculosOffline > 5) {
-      recomendacoes.push(`${estatisticas.veiculosOffline} veículos offline - Verificar rastreadores`);
-    }
-    
-    const veiculosAltaVelocidade = dadosCombinados.filter(d => d.velocidade > 80).length;
-    if (veiculosAltaVelocidade > 0) {
-      recomendacoes.push(`${veiculosAltaVelocidade} veículos em alta velocidade`);
-    }
-    
-    const cargasAtrasadas = dadosCombinados.filter(d => 
-      d.carga && d.carga.coletaData && new Date(d.carga.coletaData) < new Date() && d.carga.status === 'programada'
-    ).length;
-    if (cargasAtrasadas > 0) {
-      recomendacoes.push(`${cargasAtrasadas} cargas programadas com atraso na coleta`);
-    }
-
-    const cargasComObservacoes = dadosCombinados.filter(d => 
-      d.carga && d.carga.observacoes && d.carga.observacoes.trim().length > 0
-    ).length;
-    if (cargasComObservacoes > 0) {
-      recomendacoes.push(`${cargasComObservacoes} cargas com observações importantes`);
-    }
-    
-    if (recomendacoes.length === 0) {
-      recomendacoes.push('Tudo em ordem! Nenhuma ação urgente necessária.');
-    }
-    
-    return (
-      <div
-        style={{
-          backgroundColor: '#0A0A0A',
-          borderRadius: '20px',
-          border: '1px solid #1A1A1A',
-          padding: '16px'
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-          <Target size={18} color="#FFD700" />
-          <span style={{ fontWeight: 600, color: '#FFF' }}>Recomendações para Tomada de Decisão</span>
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          {recomendacoes.map((rec, idx) => (
-            <div
-              key={idx}
-              style={{
-                padding: '10px',
-                background: '#1A1A1A',
-                borderRadius: '10px',
-                fontSize: '13px',
-                color: '#FFD700',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px'
-              }}
-            >
-              <AlertCircle size={14} />
-              <span>{rec}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  };
-
-  // Componente de Card Estatístico
-  const StatCard = ({ title, value, icon, color, subtitle }: any) => (
-    <div
-      style={{
-        backgroundColor: '#0A0A0A',
-        borderRadius: '16px',
-        border: `1px solid ${color}30`,
-        padding: '16px',
-        transition: 'all 0.2s ease'
-      }}
-    >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <div>
-          <div style={{ fontSize: '28px', fontWeight: 800, color: '#FFF' }}>{value}</div>
-          <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>{title}</div>
-          {subtitle && <div style={{ fontSize: '10px', color: color }}>{subtitle}</div>}
-        </div>
-        <div style={{ color: color }}>{icon}</div>
-      </div>
-    </div>
-  );
-
   return (
     <div style={{ padding: '24px', backgroundColor: '#000', minHeight: '100vh', fontFamily: 'Inter, sans-serif' }}>
       <style>{`
-        * {
-          box-sizing: border-box;
-        }
-        ::-webkit-scrollbar {
-          width: 6px;
-          height: 6px;
-        }
-        ::-webkit-scrollbar-track {
-          background: #1A1A1A;
-          border-radius: 3px;
-        }
-        ::-webkit-scrollbar-thumb {
-          background: #FFD700;
-          border-radius: 3px;
-        }
-        ::-webkit-scrollbar-thumb:hover {
-          background: #FFB700;
-        }
+        * { box-sizing: border-box; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #1A1A1A; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb { background: #FFD700; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #FFB700; }
         @keyframes spin {
           from { transform: rotate(0deg); }
           to { transform: rotate(360deg); }
         }
-        #map-container {
-          width: 100%;
-          height: 100%;
-          border-radius: 12px;
-          overflow: hidden;
-        }
+        #map-container { width: 100%; height: 100%; border-radius: 12px; overflow: hidden; }
+        .custom-truck-marker { background: transparent; }
+        .custom-truck-marker div { transition: transform 0.2s ease; }
+        .custom-truck-marker:hover div { transform: scale(1.1); }
       `}</style>
 
       {/* Header */}
@@ -1307,21 +1473,25 @@ const PainelGeral: React.FC = () => {
         </div>
       </div>
 
-      {/* Cards de Estatísticas */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '24px' }}>
+      {/* Cards de Estatísticas Expandidas - CLICÁVEIS */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '16px', marginBottom: '24px' }}>
         <StatCard
-          title="Motoristas"
+          title="Total Motoristas"
           value={estatisticas.totalMotoristas}
           icon={<Users size={24} />}
           color="#FFD700"
-          subtitle={`${estatisticas.motoristasComProgramacao} com carga • ${estatisticas.motoristasDisponiveis} disponíveis`}
+          subtitle={`${estatisticas.motoristasComProgramacao} com carga`}
+          onClick={aplicarFiltroDashboard}
+          filterValue="todos"
         />
         <StatCard
-          title="Veículos"
+          title="Total Veículos"
           value={estatisticas.totalVeiculos}
           icon={<Car size={24} />}
           color="#3B82F6"
           subtitle={`${estatisticas.veiculosOnline} online • ${estatisticas.veiculosOffline} offline`}
+          onClick={() => {}}
+          filterValue={null}
         />
         <StatCard
           title="Em Rota"
@@ -1329,27 +1499,53 @@ const PainelGeral: React.FC = () => {
           icon={<Truck size={24} />}
           color="#22C55E"
           subtitle="Veículos em deslocamento"
+          onClick={aplicarFiltroDashboard}
+          filterValue="seguindo_para_entrega"
         />
         <StatCard
-          title="Eficiência da Frota"
+          title="Disponíveis"
+          value={estatisticas.motoristasDisponiveis}
+          icon={<CheckCircle size={24} />}
+          color="#10B981"
+          subtitle="Prontos para programar"
+          onClick={aplicarFiltroDashboard}
+          filterValue="disponivel"
+        />
+        <StatCard
+          title="Folga/Férias"
+          value={estatisticas.motoristasFolga + estatisticas.motoristasFerias}
+          icon={<Moon size={24} />}
+          color="#8B5CF6"
+          subtitle={`${estatisticas.motoristasFolga} folga • ${estatisticas.motoristasFerias} férias`}
+          onClick={aplicarFiltroDashboard}
+          filterValue="folga"
+        />
+        <StatCard
+          title="Sem Veículo"
+          value={estatisticas.motoristasSemVeiculo}
+          icon={<AlertTriangle size={24} />}
+          color="#EF4444"
+          subtitle="Aguardando veículo"
+          onClick={aplicarFiltroDashboard}
+          filterValue="sem_veiculo"
+        />
+        <StatCard
+          title="Falta/Atestado"
+          value={estatisticas.motoristasFalta + estatisticas.motoristasAtestado}
+          icon={<XCircle size={24} />}
+          color="#EF4444"
+          subtitle={`${estatisticas.motoristasFalta} falta • ${estatisticas.motoristasAtestado} atestado`}
+          onClick={aplicarFiltroDashboard}
+          filterValue="falta"
+        />
+        <StatCard
+          title="Eficiência"
           value={`${estatisticas.eficienciaFrota}%`}
           icon={<Target size={24} />}
           color="#FFD700"
           subtitle="Programados + Disponíveis"
-        />
-        <StatCard
-          title="MOPP Certificados"
-          value={estatisticas.motoristasMopp}
-          icon={<CheckCircle size={24} />}
-          color="#8B5CF6"
-          subtitle="Motoristas habilitados"
-        />
-        <StatCard
-          title="Aguardando Carregamento"
-          value={estatisticas.aguardandoCarregamento}
-          icon={<ClockIcon size={24} />}
-          color="#FF9500"
-          subtitle="Prontos para carregar"
+          onClick={() => {}}
+          filterValue={null}
         />
       </div>
 
@@ -1385,7 +1581,7 @@ const PainelGeral: React.FC = () => {
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  {dadosMapa.filter(d => d.coordenadas).map(item => (
+                  {dadosMapa.filter(d => d.coordenadas).slice(0, 8).map(item => (
                     <div
                       key={item.id}
                       style={{
@@ -1425,6 +1621,11 @@ const PainelGeral: React.FC = () => {
                       </div>
                     </div>
                   ))}
+                  {dadosMapa.filter(d => d.coordenadas).length > 8 && (
+                    <div style={{ textAlign: 'center', padding: '8px', color: '#666', fontSize: '11px' }}>
+                      +{dadosMapa.filter(d => d.coordenadas).length - 8} veículos na lista completa
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -1523,8 +1724,13 @@ const PainelGeral: React.FC = () => {
                 <option value="aguardando_carregamento">⏳ Aguardando Carregamento</option>
                 <option value="seguindo_para_entrega">🚛 Em Rota</option>
                 <option value="chegou_entrega">📍 Chegou na Entrega</option>
-                <option value="folga">😴 Em Folga</option>
+                <option value="folga">😴 Folga</option>
+                <option value="ferias">🏖️ Férias</option>
                 <option value="disponivel">✅ Disponível</option>
+                <option value="sem_veiculo">🚫 Sem Veículo</option>
+                <option value="falta">❌ Falta</option>
+                <option value="atestado">📋 Atestado</option>
+                <option value="veiculo_manutencao">🔧 Veículo em Manutenção</option>
               </select>
             </div>
           </div>
@@ -1532,37 +1738,39 @@ const PainelGeral: React.FC = () => {
       )}
 
       {/* Grid de Cards ou Mapa Completo */}
-      {visaoAtiva === 'grid' ? (
-        loading ? (
-          <div style={{ textAlign: 'center', padding: '60px', color: '#666' }}>
-            <RefreshCw size={40} style={{ animation: 'spin 1s linear infinite' }} />
-            <p style={{ marginTop: '16px' }}>Carregando dados...</p>
-          </div>
-        ) : dadosFiltrados.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '60px', backgroundColor: '#0A0A0A', borderRadius: '24px' }}>
-            <AlertCircle size={48} color="#666" />
-            <h3 style={{ color: '#FFF', marginTop: '16px' }}>Nenhum resultado encontrado</h3>
-            <p style={{ color: '#666' }}>Tente ajustar os filtros de busca</p>
-          </div>
+      <div id="cards-container">
+        {visaoAtiva === 'grid' ? (
+          loading ? (
+            <div style={{ textAlign: 'center', padding: '60px', color: '#666' }}>
+              <RefreshCw size={40} style={{ animation: 'spin 1s linear infinite' }} />
+              <p style={{ marginTop: '16px' }}>Carregando dados...</p>
+            </div>
+          ) : dadosFiltrados.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '60px', backgroundColor: '#0A0A0A', borderRadius: '24px' }}>
+              <AlertCircle size={48} color="#666" />
+              <h3 style={{ color: '#FFF', marginTop: '16px' }}>Nenhum resultado encontrado</h3>
+              <p style={{ color: '#666' }}>Tente ajustar os filtros de busca</p>
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(400px, 1fr))', gap: '20px' }}>
+              {dadosFiltrados.map(item => (
+                <CardInformativo key={item.id} item={item} />
+              ))}
+            </div>
+          )
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(420px, 1fr))', gap: '20px' }}>
-            {dadosFiltrados.map(item => (
-              <CardInformativo key={item.id} item={item} />
-            ))}
+          <div style={{ backgroundColor: '#0A0A0A', borderRadius: '20px', border: '1px solid #1A1A1A', padding: '16px', minHeight: '600px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', paddingBottom: '12px', borderBottom: '1px solid #1A1A1A' }}>
+              <MapIcon size={20} color="#FFD700" />
+              <span style={{ fontWeight: 600, color: '#FFF' }}>Mapa de Localização em Tempo Real</span>
+              <span style={{ fontSize: '11px', color: '#666', marginLeft: 'auto' }}>
+                {dadosMapa.filter(d => d.coordenadas).length} veículos com localização
+              </span>
+            </div>
+            <div id="map-container" style={{ width: '100%', height: '550px', borderRadius: '12px' }} />
           </div>
-        )
-      ) : (
-        <div style={{ backgroundColor: '#0A0A0A', borderRadius: '20px', border: '1px solid #1A1A1A', padding: '16px', minHeight: '600px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', paddingBottom: '12px', borderBottom: '1px solid #1A1A1A' }}>
-            <MapIcon size={20} color="#FFD700" />
-            <span style={{ fontWeight: 600, color: '#FFF' }}>Mapa de Localização em Tempo Real</span>
-            <span style={{ fontSize: '11px', color: '#666', marginLeft: 'auto' }}>
-              {dadosMapa.filter(d => d.coordenadas).length} veículos com localização
-            </span>
-          </div>
-          <div id="map-container" style={{ width: '100%', height: '550px', borderRadius: '12px' }} />
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Rodapé com informações */}
       <div style={{ marginTop: '24px', paddingTop: '16px', borderTop: '1px solid #1A1A1A', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: '#666' }}>

@@ -1,4 +1,3 @@
-// RelatorioListaMotorista.tsx
 import React, { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { db } from './firebase';
@@ -16,7 +15,7 @@ import {
   Truck, MapPin, Calendar, Clock, AlertCircle, BarChart3, 
   Printer, X, Search, Filter, ChevronDown, User, Phone, 
   Map, Calendar as CalendarIcon, ArrowLeft, Download, 
-  TrendingDown, Package, Building, Navigation
+  TrendingDown, Package, Building, Navigation, Edit3
 } from 'lucide-react';
 
 interface Motorista {
@@ -67,6 +66,33 @@ interface VeiculoData {
   ignicao?: string;
 }
 
+interface EventoEscala {
+  id: string;
+  tipo: string;
+  dataInicio: string;
+  criadoEm: any;
+}
+
+// STATUS DO MOTORISTA (mesmo do arquivo principal)
+const STATUS_MOTORISTA_OPTS: Record<string, { label: string; icon: string; cor: string; bg: string }> = {
+  'disponivel': { label: 'Disponível para Programar', icon: '✅', cor: '#22C55E', bg: '#22C55E20' },
+  'folga': { label: 'Folga', icon: '😴', cor: '#FFD700', bg: '#FFD70020' },
+  'ferias': { label: 'Férias', icon: '🏖️', cor: '#FFD700', bg: '#FFD70020' },
+  'sem_veiculo': { label: 'Sem Veículo', icon: '🚫', cor: '#EF4444', bg: '#EF444420' },
+  'falta': { label: 'Falta', icon: '❌', cor: '#EF4444', bg: '#EF444420' },
+  'atestado': { label: 'Atestado', icon: '📋', cor: '#8B5CF6', bg: '#8B5CF620' },
+  'veiculo_manutencao': { label: 'Veículo em Manutenção', icon: '🔧', cor: '#FF9500', bg: '#FF950020' }
+};
+
+const STATUS_CARGA_MAP: Record<string, { label: string; cor: string; bg: string; icon: string }> = {
+  'programada': { label: 'Programado', cor: '#FFD700', bg: '#FFD70020', icon: '📋' },
+  'aguardando_carregamento': { label: 'Aguardando Carregamento', cor: '#FF9500', bg: '#FF950020', icon: '⏳' },
+  'seguindo_para_entrega': { label: 'Seguindo para a Entrega', cor: '#22C55E', bg: '#22C55E20', icon: '🚛' },
+  'chegou_entrega': { label: 'Chegou na Entrega', cor: '#3B82F6', bg: '#3B82F620', icon: '📍' },
+};
+
+const STATUS_ATIVOS = ['programada', 'aguardando_carregamento', 'seguindo_para_entrega', 'chegou_entrega'];
+
 interface RelatorioItem {
   id: string;
   motoristaId: string;
@@ -87,21 +113,14 @@ interface RelatorioItem {
   cidadeEntrega: string;
   dataEntrega: string;
   localizacao: string;
-  leadTime: string;  // ADICIONADO
+  leadTime: string;
   leadTimeHoras: number;
   velocidade: number;
   temProgramacao: boolean;
   rastreadorStatus: string;
+  observacao: string;
+  temMopp: boolean;
 }
-
-const STATUS_CARGA_MAP: Record<string, { label: string; cor: string; bg: string; icon: string }> = {
-  'programada': { label: 'Programado', cor: '#FFD700', bg: '#FFD70020', icon: '📋' },
-  'aguardando_carregamento': { label: 'Aguardando Carregamento', cor: '#FF9500', bg: '#FF950020', icon: '⏳' },
-  'seguindo_para_entrega': { label: 'Seguindo para a Entrega', cor: '#22C55E', bg: '#22C55E20', icon: '🚛' },
-  'chegou_entrega': { label: 'Chegou na Entrega', cor: '#3B82F6', bg: '#3B82F620', icon: '📍' },
-};
-
-const STATUS_ATIVOS = ['programada', 'aguardando_carregamento', 'seguindo_para_entrega', 'chegou_entrega'];
 
 const RelatorioListaMotorista: React.FC = () => {
   const navigate = useNavigate();
@@ -109,6 +128,9 @@ const RelatorioListaMotorista: React.FC = () => {
   const [motoristas, setMotoristas] = useState<Motorista[]>([]);
   const [cargasPorMotorista, setCargasPorMotorista] = useState<Record<string, CargaProgramada | null>>({});
   const [veiculos, setVeiculos] = useState<Record<string, VeiculoData>>({});
+  const [escalaHojePorMotorista, setEscalaHojePorMotorista] = useState<Record<string, EventoEscala | null>>({});
+  const [statusSelecionado, setStatusSelecionado] = useState<Record<string, string>>({});
+  const [observacoesTemp, setObservacoesTemp] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   
   // FILTROS
@@ -126,6 +148,22 @@ const RelatorioListaMotorista: React.FC = () => {
   const [ordenarPor, setOrdenarPor] = useState<'leadTime' | 'dataEntrega' | 'nome'>('leadTime');
   const [ordenarDirecao, setOrdenarDirecao] = useState<'crescente' | 'decrescente'>('decrescente');
   const [filtrosAbertos, setFiltrosAbertos] = useState(true);
+
+  const hoje = new Date().toISOString().split('T')[0];
+
+  // Carregar status e observações salvos do localStorage
+  useEffect(() => {
+    motoristas.forEach(m => {
+      const savedStatus = localStorage.getItem(`status_motorista_${m.id}`);
+      if (savedStatus) {
+        setStatusSelecionado(prev => ({ ...prev, [m.id]: savedStatus }));
+      }
+      const savedObservacao = localStorage.getItem(`observacao_temp_${m.id}`);
+      if (savedObservacao) {
+        setObservacoesTemp(prev => ({ ...prev, [m.id]: savedObservacao }));
+      }
+    });
+  }, [motoristas]);
 
   // Carregar veículos
   useEffect(() => {
@@ -157,6 +195,39 @@ const RelatorioListaMotorista: React.FC = () => {
     };
     loadVeiculos();
   }, []);
+
+  // Carregar escalas do dia
+  useEffect(() => {
+    if (motoristas.length === 0) return;
+
+    const loadEscalas = async () => {
+      const escalasMap: Record<string, EventoEscala | null> = {};
+      
+      for (const motorista of motoristas) {
+        if (!motorista.id) continue;
+        
+        try {
+          const escalasRef = collection(db, 'motoristas', motorista.id, 'escalas_motoristas');
+          const q = query(escalasRef, where('dataInicio', '==', hoje));
+          const escalasSnap = await getDocs(q);
+          
+          if (!escalasSnap.empty) {
+            const doc = escalasSnap.docs[0];
+            escalasMap[motorista.id] = { id: doc.id, ...doc.data() } as EventoEscala;
+          } else {
+            escalasMap[motorista.id] = null;
+          }
+        } catch (error) {
+          console.error(`Erro ao buscar escala do motorista ${motorista.nome}:`, error);
+          escalasMap[motorista.id] = null;
+        }
+      }
+      
+      setEscalaHojePorMotorista(escalasMap);
+    };
+    
+    loadEscalas();
+  }, [motoristas, hoje]);
 
   // Carregar motoristas e suas cargas
   useEffect(() => {
@@ -236,7 +307,6 @@ const RelatorioListaMotorista: React.FC = () => {
     }
     
     try {
-      // Converter data de entrega (formato DD/MM/YYYY HH:MM)
       let dataEntregaDate: Date;
       
       if (dataEntrega.includes('/')) {
@@ -276,13 +346,40 @@ const RelatorioListaMotorista: React.FC = () => {
     }
   };
 
-  const getStatusMotorista = (motorista: Motorista, carga: CargaProgramada | null) => {
+  // Função para obter o status do motorista (integrado com as novas funcionalidades)
+  const getStatusMotorista = (motorista: Motorista, carga: CargaProgramada | null, eventoEscala: EventoEscala | null) => {
+    // Se tem carga, mostra o status da carga
     if (carga) {
       const statusCarga = STATUS_CARGA_MAP[carga.status];
       if (statusCarga) {
-        return { ...statusCarga, value: carga.status };
+        return { ...statusCarga, value: carga.status, isCarga: true };
       }
     }
+    
+    // Se tem status manual salvo, mostra ele
+    const statusManual = statusSelecionado[motorista.id];
+    if (statusManual && STATUS_MOTORISTA_OPTS[statusManual]) {
+      const statusOpt = STATUS_MOTORISTA_OPTS[statusManual];
+      return { label: statusOpt.label, cor: statusOpt.cor, bg: statusOpt.bg, icon: statusOpt.icon, value: statusManual, isManual: true };
+    }
+    
+    // Verifica escala do dia
+    if (eventoEscala) {
+      if (eventoEscala.tipo === 'Descanso Semanal') {
+        return { label: 'Folga', cor: '#FFD700', bg: '#FFD70020', icon: '😴', value: 'folga' };
+      }
+      if (eventoEscala.tipo === 'Férias') {
+        return { label: 'Férias', cor: '#FFD700', bg: '#FFD70020', icon: '🏖️', value: 'ferias' };
+      }
+      if (eventoEscala.tipo === 'Falta') {
+        return { label: 'Falta', cor: '#EF4444', bg: '#EF444420', icon: '❌', value: 'falta' };
+      }
+      if (eventoEscala.tipo === 'Atestado') {
+        return { label: 'Atestado', cor: '#8B5CF6', bg: '#8B5CF620', icon: '📋', value: 'atestado' };
+      }
+    }
+    
+    // Se não tem carga, nem escala, está disponível
     return { label: 'Disponível para Programar', cor: '#22C55E', bg: '#22C55E20', icon: '✅', value: 'disponivel' };
   };
 
@@ -292,11 +389,14 @@ const RelatorioListaMotorista: React.FC = () => {
     
     for (const motorista of motoristas) {
       const carga = cargasPorMotorista[motorista.id];
-      const statusInfo = getStatusMotorista(motorista, carga);
+      const eventoEscala = escalaHojePorMotorista[motorista.id];
+      const statusInfo = getStatusMotorista(motorista, carga, eventoEscala);
       const veiculoData = carga?.placa ? veiculos[carga.placa] : null;
       const velocidade = veiculoData?.velocidade || 0;
       const rastreadorStatus = veiculoData?.statusRastreador || 'offline';
       const localizacao = veiculoData?.ultimaLocalizacao || '—';
+      const temMopp = motorista.temMopp === 'Sim';
+      const observacao = observacoesTemp[motorista.id] || '';
       
       const { leadTime: leadTimeStr, horas: leadTimeHoras } = calcularLeadTime(carga?.entregaData || '—');
       
@@ -325,13 +425,13 @@ const RelatorioListaMotorista: React.FC = () => {
         velocidade: velocidade,
         temProgramacao: carga !== null && carga !== undefined,
         rastreadorStatus: rastreadorStatus,
+        observacao: observacao,
+        temMopp: temMopp,
       });
     }
     
     // Aplicar filtros
     let filtrados = dados.filter(item => {
-      const temMopp = motoristas.find(m => m.id === item.id)?.temMopp === 'Sim';
-      
       const matchTexto = !filtroTexto || 
         item.nome.toLowerCase().includes(filtroTexto.toLowerCase()) ||
         item.cpf.includes(filtroTexto) ||
@@ -340,8 +440,8 @@ const RelatorioListaMotorista: React.FC = () => {
       const matchStatus = filtroStatus === 'todos' || item.statusValue === filtroStatus;
       
       const matchMopp = filtroMopp === 'todos' ||
-        (filtroMopp === 'comMopp' && temMopp) ||
-        (filtroMopp === 'semMopp' && !temMopp);
+        (filtroMopp === 'comMopp' && item.temMopp) ||
+        (filtroMopp === 'semMopp' && !item.temMopp);
       
       const matchStatusCarga = filtroStatusCarga === 'todos' || 
         (item.temProgramacao && item.statusValue === filtroStatusCarga);
@@ -397,21 +497,34 @@ const RelatorioListaMotorista: React.FC = () => {
     });
     
     return filtrados;
-  }, [motoristas, cargasPorMotorista, veiculos, filtroTexto, filtroStatus, filtroMopp, 
-      filtroStatusCarga, filtroCidade, filtroPlaca, filtroRastreador, filtroClienteColeta,
-      filtroClienteEntrega, filtroDataInicial, filtroDataFinal, ordenarPor, ordenarDirecao]);
+  }, [motoristas, cargasPorMotorista, veiculos, escalaHojePorMotorista, statusSelecionado, observacoesTemp,
+      filtroTexto, filtroStatus, filtroMopp, filtroStatusCarga, filtroCidade, filtroPlaca, filtroRastreador, 
+      filtroClienteColeta, filtroClienteEntrega, filtroDataInicial, filtroDataFinal, ordenarPor, ordenarDirecao]);
 
+  // Estatísticas expandidas
   const stats = useMemo(() => {
     const total = motoristas.length;
     const comProgramacao = dadosRelatorio.filter(d => d.temProgramacao).length;
-    const semProgramacao = total - comProgramacao;
+    
+    // Estatísticas de status dos motoristas sem programação
+    const disponiveis = dadosRelatorio.filter(d => d.statusValue === 'disponivel' && !d.temProgramacao).length;
+    const folga = dadosRelatorio.filter(d => d.statusValue === 'folga' && !d.temProgramacao).length;
+    const ferias = dadosRelatorio.filter(d => d.statusValue === 'ferias' && !d.temProgramacao).length;
+    const semVeiculo = dadosRelatorio.filter(d => d.statusValue === 'sem_veiculo' && !d.temProgramacao).length;
+    const veiculoManutencao = dadosRelatorio.filter(d => d.statusValue === 'veiculo_manutencao' && !d.temProgramacao).length;
+    const falta = dadosRelatorio.filter(d => d.statusValue === 'falta' && !d.temProgramacao).length;
+    const atestado = dadosRelatorio.filter(d => d.statusValue === 'atestado' && !d.temProgramacao).length;
+    
     const comMopp = motoristas.filter(m => m.temMopp === 'Sim').length;
     const totalViagens = motoristas.reduce((sum, m) => sum + (m.viagensRealizadas || 0), 0);
     const tempoMedioEspera = dadosRelatorio
       .filter(d => d.leadTimeHoras > 0)
       .reduce((sum, d) => sum + d.leadTimeHoras, 0) / (dadosRelatorio.filter(d => d.leadTimeHoras > 0).length || 1);
     
-    return { total, comProgramacao, semProgramacao, comMopp, totalViagens, tempoMedioEspera };
+    return { 
+      total, comProgramacao, disponiveis, folga, ferias, semVeiculo, veiculoManutencao, falta, atestado,
+      comMopp, totalViagens, tempoMedioEspera
+    };
   }, [motoristas, dadosRelatorio]);
 
   const limparTodosFiltros = () => {
@@ -434,7 +547,7 @@ const RelatorioListaMotorista: React.FC = () => {
     const headers = [
       'Status', 'Motorista', 'CPF', 'Telefone', 'Cidade', 'Placa', 'Carreta',
       'Cliente Coleta', 'Cidade Coleta', 'Data Coleta', 'Cliente Entrega',
-      'Cidade Entrega', 'Data Entrega', 'Lead Time', 'Localização', 'Velocidade'
+      'Cidade Entrega', 'Data Entrega', 'Lead Time', 'Localização', 'Velocidade', 'Observação'
     ];
     
     const rows = dadosRelatorio.map(item => [
@@ -453,7 +566,8 @@ const RelatorioListaMotorista: React.FC = () => {
       item.dataEntrega,
       item.leadTime,
       item.localizacao,
-      item.velocidade > 0 ? `${item.velocidade} km/h` : 'Parado'
+      item.velocidade > 0 ? `${item.velocidade} km/h` : 'Parado',
+      item.observacao
     ]);
     
     const csvContent = [headers, ...rows].map(row => row.join(',')).join('\n');
@@ -476,7 +590,7 @@ const RelatorioListaMotorista: React.FC = () => {
     return '#EF4444';
   };
 
-  // Estilos (mantenha os mesmos estilos do seu arquivo original)
+  // Estilos
   const containerStyle: React.CSSProperties = {
     padding: '32px 24px',
     backgroundColor: '#000',
@@ -519,29 +633,31 @@ const RelatorioListaMotorista: React.FC = () => {
   
   const statsGridStyle: React.CSSProperties = {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-    gap: '16px',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+    gap: '12px',
     marginBottom: '24px'
   };
   
   const statCardStyle: React.CSSProperties = {
     background: '#0A0A0A',
     border: '1px solid #1F1F1F',
-    borderRadius: '16px',
-    padding: '16px 20px'
+    borderRadius: '12px',
+    padding: '12px 16px',
+    textAlign: 'center'
   };
   
   const statValueStyle: React.CSSProperties = {
-    fontSize: '28px',
+    fontSize: '22px',
     fontWeight: 800,
     color: '#FFD700',
     margin: 0
   };
   
   const statLabelStyle: React.CSSProperties = {
-    fontSize: '12px',
+    fontSize: '10px',
     color: '#888',
-    marginTop: '4px'
+    marginTop: '4px',
+    textTransform: 'uppercase'
   };
   
   const filtersBarStyle: React.CSSProperties = {
@@ -607,7 +723,7 @@ const RelatorioListaMotorista: React.FC = () => {
   
   const filtersGridStyle: React.CSSProperties = {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
     gap: '16px'
   };
   
@@ -679,7 +795,7 @@ const RelatorioListaMotorista: React.FC = () => {
   
   const tableContainerStyle: React.CSSProperties = {
     overflowX: 'auto',
-    maxHeight: 'calc(100vh - 350px)',
+    maxHeight: 'calc(100vh - 400px)',
     overflowY: 'auto',
     borderRadius: '16px',
     border: '1px solid #1F1F1F'
@@ -689,7 +805,7 @@ const RelatorioListaMotorista: React.FC = () => {
     width: '100%',
     borderCollapse: 'collapse',
     fontSize: '12px',
-    minWidth: '1400px'
+    minWidth: '1500px'
   };
   
   const thStyle: React.CSSProperties = {
@@ -753,19 +869,43 @@ const RelatorioListaMotorista: React.FC = () => {
         </button>
       </div>
 
-      {/* Cards de Estatísticas */}
+      {/* Cards de Estatísticas Expandidas */}
       <div style={statsGridStyle}>
         <div style={statCardStyle}>
           <p style={statValueStyle}>{stats.total}</p>
-          <p style={statLabelStyle}>Total de Motoristas</p>
+          <p style={statLabelStyle}>Total</p>
         </div>
         <div style={statCardStyle}>
           <p style={{ ...statValueStyle, color: '#22C55E' }}>{stats.comProgramacao}</p>
-          <p style={statLabelStyle}>Com Programação Ativa</p>
+          <p style={statLabelStyle}>Programados</p>
         </div>
         <div style={statCardStyle}>
-          <p style={{ ...statValueStyle, color: '#EF4444' }}>{stats.semProgramacao}</p>
+          <p style={{ ...statValueStyle, color: '#3B82F6' }}>{stats.disponiveis}</p>
           <p style={statLabelStyle}>Disponíveis</p>
+        </div>
+        <div style={statCardStyle}>
+          <p style={{ ...statValueStyle, color: '#FFD700' }}>{stats.folga}</p>
+          <p style={statLabelStyle}>Folga</p>
+        </div>
+        <div style={statCardStyle}>
+          <p style={{ ...statValueStyle, color: '#FFD700' }}>{stats.ferias}</p>
+          <p style={statLabelStyle}>Férias</p>
+        </div>
+        <div style={statCardStyle}>
+          <p style={{ ...statValueStyle, color: '#EF4444' }}>{stats.semVeiculo}</p>
+          <p style={statLabelStyle}>Sem Veículo</p>
+        </div>
+        <div style={statCardStyle}>
+          <p style={{ ...statValueStyle, color: '#FF9500' }}>{stats.veiculoManutencao}</p>
+          <p style={statLabelStyle}>Veic. Manut.</p>
+        </div>
+        <div style={statCardStyle}>
+          <p style={{ ...statValueStyle, color: '#EF4444' }}>{stats.falta}</p>
+          <p style={statLabelStyle}>Falta</p>
+        </div>
+        <div style={statCardStyle}>
+          <p style={{ ...statValueStyle, color: '#8B5CF6' }}>{stats.atestado}</p>
+          <p style={statLabelStyle}>Atestado</p>
         </div>
         <div style={statCardStyle}>
           <p style={{ ...statValueStyle, color: '#8B5CF6' }}>{stats.comMopp}</p>
@@ -773,13 +913,13 @@ const RelatorioListaMotorista: React.FC = () => {
         </div>
         <div style={statCardStyle}>
           <p style={{ ...statValueStyle, color: '#FF9500' }}>{stats.totalViagens}</p>
-          <p style={statLabelStyle}>Total de Viagens</p>
+          <p style={statLabelStyle}>Viagens</p>
         </div>
         <div style={statCardStyle}>
           <p style={{ ...statValueStyle, color: '#3B82F6' }}>
             {stats.tempoMedioEspera > 0 ? `${Math.round(stats.tempoMedioEspera)}h` : '—'}
           </p>
-          <p style={statLabelStyle}>Tempo Médio de Espera</p>
+          <p style={statLabelStyle}>Tempo Médio</p>
         </div>
       </div>
 
@@ -832,6 +972,12 @@ const RelatorioListaMotorista: React.FC = () => {
                 <option value="aguardando_carregamento">⏳ Aguardando Carregamento</option>
                 <option value="seguindo_para_entrega">🚛 Seguindo para Entrega</option>
                 <option value="chegou_entrega">📍 Chegou na Entrega</option>
+                <option value="folga">😴 Folga</option>
+                <option value="ferias">🏖️ Férias</option>
+                <option value="sem_veiculo">🚫 Sem Veículo</option>
+                <option value="falta">❌ Falta</option>
+                <option value="atestado">📋 Atestado</option>
+                <option value="veiculo_manutencao">🔧 Veículo em Manutenção</option>
               </select>
             </div>
             <div style={filterGroupStyle}>
@@ -938,12 +1084,13 @@ const RelatorioListaMotorista: React.FC = () => {
               <th style={thStyle}>Data Entrega</th>
               <th style={thStyle}>Lead Time</th>
               <th style={thStyle}>Localização</th>
+              <th style={thStyle}>Observação</th>
             </tr>
           </thead>
           <tbody>
             {dadosRelatorio.length === 0 ? (
               <tr>
-                <td colSpan={14} style={{ textAlign: 'center', padding: '60px', color: '#666' }}>
+                <td colSpan={15} style={{ textAlign: 'center', padding: '60px', color: '#666' }}>
                   <AlertCircle size={40} color="#666" />
                   <p style={{ marginTop: '12px' }}>Nenhum motorista encontrado com os filtros aplicados</p>
                 </td>
@@ -959,6 +1106,7 @@ const RelatorioListaMotorista: React.FC = () => {
                   <td style={tdStyle}>
                     <strong style={{ color: '#FFF' }}>{item.nome}</strong>
                     <div style={{ fontSize: '10px', color: '#666' }}>📍 {item.cidade}</div>
+                    {item.temMopp && <div style={{ fontSize: '9px', color: '#22C55E', marginTop: '2px' }}>✅ MOPP</div>}
                   </td>
                   <td style={tdStyle}>{item.cpf}</td>
                   <td style={tdStyle}>
@@ -1035,6 +1183,14 @@ const RelatorioListaMotorista: React.FC = () => {
                             🏎️ {item.velocidade} km/h
                           </div>
                         )}
+                      </div>
+                    ) : '—'}
+                  </td>
+                  <td style={tdStyle}>
+                    {item.observacao ? (
+                      <div style={{ fontSize: '11px', color: '#FFD700', maxWidth: '200px' }}>
+                        <Edit3 size={10} style={{ display: 'inline', marginRight: '4px' }} />
+                        {item.observacao.length > 40 ? item.observacao.substring(0, 37) + '...' : item.observacao}
                       </div>
                     ) : '—'}
                   </td>

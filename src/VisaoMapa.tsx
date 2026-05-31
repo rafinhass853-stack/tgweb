@@ -1,4 +1,4 @@
-// VisaoMapa.tsx - VERSÃO COM FILTRO DE LOCAIS
+// VisaoMapa.tsx - VERSÃO COMPLETA CORRIGIDA
 import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Tooltip, useMap, useMapEvents, Circle, Polygon } from 'react-leaflet';
 import L from 'leaflet';
@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 
 // ============================================
-// INTERFACES EXPANDIDAS (MANTIDAS)
+// INTERFACES EXPANDIDAS
 // ============================================
 
 type TipoLocal = 'cliente_homologado' | 'cliente_potencial' | 'ponto_apoio' | 'abastecimento' | 'filial' | 'matriz' | 'balanca' | 'pedagio';
@@ -135,7 +135,7 @@ const extrairDataPura = (dataComHora?: string): string => {
 };
 
 // ============================================
-// FUNÇÕES UTILITÁRIAS (MANTIDAS)
+// FUNÇÕES UTILITÁRIAS
 // ============================================
 
 const calcularDistancia = (lat1: number, lng1: number, lat2: number, lng2: number): number => {
@@ -217,7 +217,6 @@ const formatarTempo = (minutos: number): string => {
 // COMPONENTES DE NAVEGAÇÃO
 // ============================================
 
-// Botão de zoom responsivo
 const ZoomControls: React.FC<{ map?: L.Map }> = ({ map }) => {
   const handleZoomIn = () => map?.zoomIn();
   const handleZoomOut = () => map?.zoomOut();
@@ -290,7 +289,6 @@ const ZoomControls: React.FC<{ map?: L.Map }> = ({ map }) => {
   );
 };
 
-// Botão de centralizar localização
 const LocateButton: React.FC<{ onLocate: () => void }> = ({ onLocate }) => {
   return (
     <button
@@ -327,7 +325,6 @@ const LocateButton: React.FC<{ onLocate: () => void }> = ({ onLocate }) => {
   );
 };
 
-// Mini dashboard de estatísticas
 const StatsWidget: React.FC<{ stats: any; onExpand?: () => void }> = ({ stats, onExpand }) => {
   const [expanded, setExpanded] = useState(false);
   
@@ -402,7 +399,6 @@ const StatsWidget: React.FC<{ stats: any; onExpand?: () => void }> = ({ stats, o
   );
 };
 
-// Menu de navegação rápida
 const QuickNavMenu: React.FC<{
   locais: LocalComGeofence[];
   onNavigateTo: (lat: number, lng: number) => void;
@@ -465,7 +461,7 @@ const QuickNavMenu: React.FC<{
               onChange={(e) => setSearchTerm(e.target.value)}
               style={{
                 width: '100%',
-                padding: '10px',
+                padding: 10,
                 borderRadius: 8,
                 border: '1px solid #333',
                 backgroundColor: '#1A1A1A',
@@ -710,7 +706,7 @@ const FilterPanel: React.FC<{
   );
 };
 
-// NOVO: Painel de filtros de LOCAIS
+// Painel de filtros de LOCAIS
 const FilterLocaisPanel: React.FC<{
   filtros: any;
   onFilterChange: (filtros: any) => void;
@@ -755,14 +751,6 @@ const FilterLocaisPanel: React.FC<{
     setLocalFiltros(resetFiltros);
     onFilterChange(resetFiltros);
     onClose();
-  };
-  
-  // Conta quantos motoristas estão em cada local
-  const getMotoristasNoLocal = (localId: string) => {
-    return motoristas.filter(m => {
-      const local = locais.find(l => l.id === localId);
-      return local && motoristaEmGeofence(m, local);
-    }).length;
   };
   
   return (
@@ -1706,7 +1694,7 @@ const VisaoMapa: React.FC<VisaoMapaProps> = ({
   const [showListaLocais, setShowListaLocais] = useState(false);
   const [showHistorico, setShowHistorico] = useState(false);
   const [showFilterPanel, setShowFilterPanel] = useState(false);
-  const [showFilterLocaisPanel, setShowFilterLocaisPanel] = useState(false); // NOVO
+  const [showFilterLocaisPanel, setShowFilterLocaisPanel] = useState(false);
   const [showLegenda, setShowLegenda] = useState(false);
   const [localEditando, setLocalEditando] = useState<LocalComGeofence | null>(null);
   const [locais, setLocais] = useState<LocalComGeofence[]>([]);
@@ -1723,7 +1711,7 @@ const VisaoMapa: React.FC<VisaoMapaProps> = ({
     dataEntrega: ''
   });
   
-  // NOVO: Filtros para locais
+  // Filtros para locais
   const [filtrosLocais, setFiltrosLocais] = useState({
     tipos: [] as TipoLocal[],
     busca: '',
@@ -1940,11 +1928,10 @@ const VisaoMapa: React.FC<VisaoMapaProps> = ({
     );
   }, [motoristasFiltrados]);
 
-  // NOVO: Filtro de locais
+  // Filtro de locais
   const locaisFiltrados = useMemo(() => {
     let filtrados = [...locais];
     
-    // Filtro por busca de nome
     if (filtrosLocais.busca) {
       filtrados = filtrados.filter(local => 
         local.nome.toLowerCase().includes(filtrosLocais.busca.toLowerCase()) ||
@@ -1952,15 +1939,12 @@ const VisaoMapa: React.FC<VisaoMapaProps> = ({
       );
     }
     
-    // Filtro por tipos
     if (filtrosLocais.tipos.length > 0) {
       filtrados = filtrados.filter(local => filtrosLocais.tipos.includes(local.tipo));
     }
     
-    // Filtro "apenas com motoristas"
     if (filtrosLocais.apenasComMotoristas) {
       filtrados = filtrados.filter(local => {
-        // Verifica se algum motorista está dentro desta geofence
         return motoristas.some(motorista => motoristaEmGeofence(motorista, local));
       });
     }
@@ -1998,7 +1982,7 @@ const VisaoMapa: React.FC<VisaoMapaProps> = ({
     <div style={{
       position: 'absolute',
       bottom: 20,
-      left: 20,
+      left: 100,
       zIndex: 1000,
       backgroundColor: 'rgba(0,0,0,0.85)',
       backdropFilter: 'blur(10px)',
@@ -2029,7 +2013,6 @@ const VisaoMapa: React.FC<VisaoMapaProps> = ({
           </div>
         ))}
       </div>
-      {/* Status dos filtros de locais */}
       {(filtrosLocais.tipos.length > 0 || filtrosLocais.busca || filtrosLocais.apenasComMotoristas) && (
         <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.1)' }}>
           <div style={{ fontSize: 10, color: '#FFD700' }}>
@@ -2176,7 +2159,6 @@ const VisaoMapa: React.FC<VisaoMapaProps> = ({
             <History size={16} /> Histórico
           </button>
 
-          {/* Botão de filtro de MOTORISTAS */}
           <button
             onClick={() => setShowFilterPanel(!showFilterPanel)}
             style={{
@@ -2196,7 +2178,6 @@ const VisaoMapa: React.FC<VisaoMapaProps> = ({
             <Truck size={16} /> Motoristas
           </button>
 
-          {/* NOVO: Botão de filtro de LOCAIS */}
           <button
             onClick={() => setShowFilterLocaisPanel(!showFilterLocaisPanel)}
             style={{
@@ -2416,7 +2397,6 @@ const VisaoMapa: React.FC<VisaoMapaProps> = ({
         />
       )}
 
-      {/* NOVO: Painel de filtro de LOCAIS */}
       {showFilterLocaisPanel && (
         <FilterLocaisPanel
           filtros={filtrosLocais}
